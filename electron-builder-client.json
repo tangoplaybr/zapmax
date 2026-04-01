@@ -1,0 +1,30 @@
+{
+    "appId": "com.wa.client",
+    "productName": "ZapMax",
+    "copyright": "Copyright © 2026",
+    "directories": {
+        "output": "dist/client"
+    },
+    "files": [
+        "apps/client/**/*",
+        "node_modules/**/*",
+        "!**/node_modules/*/{test,tests,samples,examples,example}/**/*",
+        "!**/node_modules/*/.*"
+    ],
+    "extraResources": [
+        {
+            "from": "Icon/logo.png",
+            "to": "logo.png"
+        }
+    ],
+    "extraMetadata": {
+        "main": "apps/client/index.js"
+    },
+    "win": {
+        "target": "dir",
+        "icon": "Icon/logo.png"
+    },
+    "nodeGypRebuild": false,
+    "npmRebuild": false,
+    "asar": true
+}

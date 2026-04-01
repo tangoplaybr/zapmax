@@ -1,0 +1,212 @@
+:root {
+    --primary: #25d366;
+    --primary-dark: #075e54;
+    --bg-dark: #111b21;
+    --bg-sidebar: #202c33;
+    --text-main: #e9edef;
+    --text-secondary: #8696a0;
+    --accent: #00a884;
+    --danger: #f15c6d;
+    --card-bg: #2a3942;
+}
+
+body {
+    margin: 0;
+    font-family: 'Segoe UI', sans-serif;
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* Sidebar Navigation */
+.sidebar {
+    width: 260px;
+    background-color: var(--bg-sidebar);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+}
+
+.logo {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: var(--primary);
+    margin-bottom: 40px;
+}
+
+nav button {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    text-align: left;
+    padding: 12px 15px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    margin-bottom: 5px;
+}
+
+nav button:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-main);
+}
+
+/* Main Content Area */
+.content {
+    flex: 1;
+    padding: 40px;
+    overflow-y: auto;
+}
+
+h1 {
+    font-weight: 300;
+    margin-top: 0;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 5px 15px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+}
+
+.offline {
+    background: #444;
+}
+
+.online {
+    background: var(--primary);
+}
+
+.qr-container {
+    background: white;
+    padding: 40px;
+    border-radius: 12px;
+    text-align: center;
+    color: #333;
+    margin-top: 40px;
+    display: inline-block;
+}
+
+.admin-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+}
+
+.card {
+    background: var(--card-bg);
+    padding: 25px;
+    border-radius: 12px;
+}
+
+/* Forms */
+input {
+    width: 100%;
+    padding: 12px;
+    margin: 10px 0;
+    border: 1px solid #3b4a54;
+    background: #3b4a54;
+    color: white;
+    border-radius: 6px;
+    box-sizing: border-box;
+}
+
+button[type="submit"] {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    width: 100%;
+    font-weight: bold;
+}
+
+/* Login screen specific */
+.login-body {
+    justify-content: center;
+    align-items: center;
+    background: radial-gradient(circle, #202c33 0%, var(--bg-dark) 100%);
+}
+
+.login-card {
+    background: var(--card-bg);
+    padding: 40px;
+    border-radius: 16px;
+    width: 350px;
+    text-align: center;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* Utility */
+.hidden {
+    display: none;
+}
+
+.error-msg {
+    color: var(--danger);
+    margin-top: 15px;
+    font-size: 0.9rem;
+}
+
+/* Chat specific */
+.app-container {
+    display: flex;
+    width: 100%;
+}
+
+.queue-list {
+    overflow-y: auto;
+    margin-top: 20px;
+}
+
+.queue-item {
+    padding: 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+}
+
+.queue-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.queue-item.active {
+    border-left: 4px solid var(--primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.messages-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+}
+
+.message {
+    margin-bottom: 10px;
+    max-width: 70%;
+    padding: 10px 15px;
+    border-radius: 8px;
+}
+
+.incoming {
+    align-self: flex-start;
+    background: #202c33;
+}
+
+.outgoing {
+    align-self: flex-end;
+    background: #005c4b;
+}
+
+.chat-composer {
+    padding: 20px;
+    background: var(--bg-sidebar);
+    display: flex;
+    gap: 10px;
+}

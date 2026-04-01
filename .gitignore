@@ -1,0 +1,51 @@
+# Dependências do Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Builds e Distribuição (Electron)
+dist/
+build/
+out/
+release/
+
+# Sessões e Cache do WhatsApp Web JS
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Banco de Dados
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+# Arquivos de Backup (Importante para o tamanho do repositório)
+*.rar
+*.zip
+*.tar.gz
+*.bak
+"backup - bug das duplicadas apenas.rar"
+
+# Variáveis de Ambiente e Arquivos Sensíveis
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs/
+*.log
+
+# Arquivos de Sistema (macOS/Windows)
+.DS_Store
+Thumbs.db
+
+# Diretórios de desenvolvimento do frontend (se houver build local em public)
+# (descomente se for necessário ignorar pasta public compilada)
+# public/build/
+
+# Pasta do Agente (Opcional, mas geralmente GEMINI.md vai junto)
+# .agent/ 

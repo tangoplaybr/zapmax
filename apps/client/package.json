@@ -1,0 +1,19 @@
+{
+    "name": "whatsapp-client",
+    "version": "1.0.0",
+    "main": "index.js",
+    "description": "WhatsApp Attendant Client",
+    "author": "Antigravity",
+    "build": {
+        "appId": "com.zapmax.client",
+        "productName": "ZapMax",
+        "electronVersion": "28.3.3",
+        "win": {
+            "target": "portable",
+            "icon": "icon.png"
+        },
+        "directories": {
+            "output": "../../dist/client"
+        }
+    }
+}

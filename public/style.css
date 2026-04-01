@@ -1,0 +1,255 @@
+:root {
+    --primary: #00a884;
+    --incoming: #202c33;
+    --outgoing: #005c4b;
+    --bg-main: #0b141a;
+    --bg-sidebar: #111b21;
+    --text: #e9edef;
+    --border: rgba(255, 255, 255, 0.1);
+}
+
+body,
+html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: 'Segoe UI', sans-serif;
+    background: var(--bg-main);
+    color: var(--text);
+}
+
+.app-container {
+    display: flex;
+    height: 100vh;
+}
+
+.sidebar {
+    width: 350px;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-header {
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.queue-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.queue-item {
+    padding: 15px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.queue-item:hover {
+    background: #2a3942;
+}
+
+.queue-item.active {
+    background: #2a3942;
+}
+
+.queue-item.waiting {
+    border-left: 4px solid #f15c6d;
+}
+
+.queue-item.attending {
+    border-left: 4px solid var(--primary);
+}
+
+.item-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+}
+
+.name {
+    font-weight: 600;
+}
+
+.time {
+    font-size: 0.8rem;
+    color: #8696a0;
+}
+
+.last-msg {
+    font-size: 0.9rem;
+    color: #8696a0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.status-info {
+    font-size: 0.75rem;
+    margin-top: 5px;
+    color: var(--primary);
+}
+
+.chat-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png');
+    background-blend-mode: overlay;
+    background-color: #0b141a;
+}
+
+.chat-header {
+    padding: 15px 30px;
+    background: #202c33;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+}
+
+.status-label {
+    font-size: 0.8rem;
+    color: var(--primary);
+}
+
+.messages-container {
+    flex: 1;
+    padding: 30px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.message {
+    margin-bottom: 10px;
+    max-width: 65%;
+    display: flex;
+    flex-direction: column;
+}
+
+.incoming {
+    align-self: flex-start;
+}
+
+.outgoing {
+    align-self: flex-end;
+}
+
+.msg-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.outgoing .msg-row {
+    flex-direction: row;
+}
+
+.incoming .msg-row {
+    flex-direction: row;
+}
+
+.msg-actions {
+    display: none;
+    flex-shrink: 0;
+    gap: 2px;
+}
+
+.message:hover .msg-actions {
+    display: flex;
+}
+
+.action-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 2px 4px;
+    border-radius: 4px;
+    opacity: 0.7;
+    transition: opacity 0.15s, background 0.15s;
+}
+
+.action-btn:hover {
+    opacity: 1;
+    background: rgba(255,255,255,0.1);
+}
+
+.deleted-bubble {
+    font-style: italic;
+    opacity: 0.5;
+}
+
+.edited-label {
+    font-size: 0.7rem;
+    color: #8696a0;
+    margin-left: 6px;
+    font-style: italic;
+}
+
+.bubble {
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    position: relative;
+}
+
+.incoming .bubble {
+    background: var(--incoming);
+    border-top-left-radius: 0;
+}
+
+.outgoing .bubble {
+    background: var(--outgoing);
+    border-top-right-radius: 0;
+}
+
+.msg-time {
+    font-size: 0.7rem;
+    color: #8696a0;
+    margin-top: 4px;
+    align-self: flex-end;
+}
+
+.chat-composer {
+    padding: 15px 30px;
+    background: #202c33;
+    display: flex;
+    gap: 15px;
+}
+
+#message-input {
+    flex: 1;
+    background: #2a3942;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 25px;
+    color: white;
+    outline: none;
+}
+
+#send-btn {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 10px 25px;
+    border-radius: 25px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.welcome-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #8696a0;
+}
+
+.hidden {
+    display: none;
+}

@@ -1,0 +1,28 @@
+{
+  "name": "sistema-whatsapp-multi",
+  "version": "1.0.0",
+  "description": "WhatsApp Management System with Admin and Multi-Client Support",
+  "main": "index.js",
+  "scripts": {
+    "start:server": "electron apps/server/index.js",
+    "start:client": "electron apps/client/index.js",
+    "build:server": "electron-builder build --config electron-builder-server.json",
+    "build:client": "electron-builder build --config electron-builder-client.json"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "groq-sdk": "^0.37.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.1.0",
+    "qrcode-terminal": "^0.12.0",
+    "socket.io": "^4.7.2",
+    "sqlite3": "^5.1.6",
+    "whatsapp-web.js": "^1.34.6"
+  },
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3"
+  }
+}

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Estação de Atendimento - WhatsApp</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="attendant-body">
+    <div class="app-container">
+        <!-- Sidebar - Queue -->
+        <aside class="sidebar">
+            <header class="sidebar-header">
+                <h2>Fila de Atendimento</h2>
+            </header>
+            <div id="queue-list" class="queue-list">
+                <!-- Waiting chats will appear here -->
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="chat-area">
+            <header id="chat-header" class="chat-header hidden">
+                <div class="chat-info">
+                    <h3 id="active-chat-name">Seleccione um chat</h3>
+                    <span id="active-chat-status" class="status-label"></span>
+                </div>
+            </header>
+
+            <div id="messages-container" class="messages-container">
+                <div class="welcome-screen">
+                    <h1>Selecione um atendimento na fila</h1>
+                </div>
+            </div>
+
+            <footer id="chat-composer" class="chat-composer hidden">
+                <input type="text" id="message-input" placeholder="Digite sua resposta...">
+                <button id="send-btn">Enviar</button>
+            </footer>
+        </main>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+        let currentChatId = null;
+        const attendantName = prompt("Qual seu nome?") || "Atendente " + Math.floor(Math.random() * 100);
+        const attendantId = 'att_' + Date.now();
+
+        socket.emit('identify', { id: attendantId, name: attendantName });
+
+        const queueList = document.getElementById('queue-list');
+        const chatHeader = document.getElementById('chat-header');
+        const chatComposer = document.getElementById('chat-composer');
+        const activeChatName = document.getElementById('active-chat-name');
+        const activeChatStatus = document.getElementById('active-chat-status');
+        const messagesContainer = document.getElementById('messages-container');
+        const input = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        // Queue Update
+        socket.on('queue_update', (queue) => {
+            queueList.innerHTML = '';
+            queue.forEach(chat => {
+                const item = document.createElement('div');
+                item.className = `queue-item ${chat.status}`;
+                if (chat.id === currentChatId) item.classList.add('active');
+
+                item.innerHTML = `
+                    <div class="item-header">
+                        <span class="name">${chat.name || chat.id}</span>
+                        <span class="time">${new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                    <div class="last-msg">${chat.last_message || ''}</div>
+                    <div class="status-info">${chat.attendant_name ? 'Atendido por: ' + chat.attendant_name : 'Aguardando'}</div>
+                `;
+
+                item.onclick = () => selectChat(chat);
+                queueList.appendChild(item);
+            });
+        });
+
+        function selectChat(chat) {
+            currentChatId = chat.id;
+            activeChatName.innerText = chat.name || chat.id;
+            activeChatStatus.innerText = chat.status === 'attending' ? `Em atendimento por ${chat.attendant_name}` : 'Aguardando claim';
+
+            chatHeader.classList.remove('hidden');
+            chatComposer.classList.remove('hidden');
+
+            socket.emit('claim_chat', { chatId: chat.id });
+        }
+
+        socket.on('chat_history', ({ chatId, history }) => {
+            if (chatId !== currentChatId) return;
+            renderMessages(history);
+        });
+
+        socket.on('new_whatsapp_message', (msg) => {
+            if (msg.chatId === currentChatId) {
+                // Audio alert
+                new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3').play();
+                socket.emit('claim_chat', { chatId: currentChatId }); // Refresh history
+            }
+        });
+
+        function renderMessages(messages) {
+            messagesContainer.innerHTML = '';
+            messages.forEach(msg => {
+                const div = document.createElement('div');
+                div.className = `message ${msg.from_me ? 'outgoing' : 'incoming'}`;
+
+                if (msg.is_deleted) {
+                    div.innerHTML = `
+                        <div class="msg-row">
+                            <div class="bubble deleted-bubble">🚫 Mensagem apagada</div>
+                        </div>
+                        <div class="msg-time">${new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    `;
+                } else {
+                    const editedLabel = msg.is_edited ? ' <span class="edited-label">(editado)</span>' : '';
+                    const actions = msg.from_me ? `
+                        <span class="msg-actions">
+                            <button class="action-btn edit-btn" title="Editar" onclick="editMsg('${msg.id}', this)">✏️</button>
+                            <button class="action-btn delete-btn" title="Apagar" onclick="deleteMsg('${msg.id}')">🗑️</button>
+                        </span>
+                    ` : '';
+
+                    div.innerHTML = `
+                        <div class="msg-row">
+                            <div class="bubble">${msg.body}${editedLabel}</div>
+                            ${actions}
+                        </div>
+                        <div class="msg-time">${new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    `;
+                }
+
+                messagesContainer.appendChild(div);
+            });
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function editMsg(msgId, btnEl) {
+            const bubble = btnEl.closest('.msg-row').querySelector('.bubble');
+            const currentText = bubble.textContent.replace('(editado)', '').trim();
+            const newBody = prompt('Editar mensagem:', currentText);
+            if (newBody !== null && newBody.trim() !== '' && newBody.trim() !== currentText) {
+                socket.emit('edit_message', { chatId: currentChatId, msgId, newBody: newBody.trim() });
+            }
+        }
+
+        function deleteMsg(msgId) {
+            if (confirm('Apagar esta mensagem para todos?')) {
+                socket.emit('delete_message', { chatId: currentChatId, msgId });
+            }
+        }
+
+        function sendMessage() {
+            const body = input.value.trim();
+            if (body && currentChatId) {
+                socket.emit('send_message', { chatId: currentChatId, body });
+                input.value = '';
+            }
+        }
+
+        sendBtn.onclick = sendMessage;
+        input.onkeypress = (e) => { if (e.key === 'Enter') sendMessage(); };
+    </script>
+</body>
+
+</html>

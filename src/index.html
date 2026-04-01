@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WhatsApp Server Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="server-body">
+    <div class="container">
+        <header>
+            <h1>WhatsApp Central Gateway</h1>
+            <div id="status" class="status-badge offline">Offline</div>
+        </header>
+
+        <main>
+            <div id="qr-container" class="qr-container">
+                <p>Aguardando conexão...</p>
+                <div id="qrcode"></div>
+                <p class="instruction">Escaneie o QR Code com seu WhatsApp</p>
+            </div>
+
+            <div id="ready-container" class="ready-container hidden">
+                <div class="success-icon">✔️</div>
+                <h2>WhatsApp Conectado!</h2>
+                <p>O servidor está operando normalmente.</p>
+                <div class="server-info">
+                    <p><strong>URL das estações:</strong> <span id="server-url">http://localhost:3000</span></p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
+    <script>
+        const socket = io('http://localhost:3000');
+        const statusBadge = document.getElementById('status');
+        const qrContainer = document.getElementById('qr-container');
+        const readyContainer = document.getElementById('ready-container');
+        const qrcodeDiv = document.getElementById('qrcode');
+
+        socket.on('whatsapp_qr', (qr) => {
+            statusBadge.innerText = 'Aguardando Login';
+            statusBadge.className = 'status-badge waiting';
+            qrcodeDiv.innerHTML = '';
+            new QRCode(qrcodeDiv, {
+                text: qr,
+                width: 256,
+                height: 256
+            });
+        });
+
+        socket.on('whatsapp_ready', () => {
+            statusBadge.innerText = 'Online';
+            statusBadge.className = 'status-badge online';
+            qrContainer.classList.add('hidden');
+            readyContainer.classList.remove('hidden');
+        });
+
+        socket.on('connect', () => {
+            console.log('Connected to server socket');
+        });
+    </script>
+</body>
+</html>

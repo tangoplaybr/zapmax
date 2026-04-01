@@ -1,0 +1,29 @@
+{
+    "appId": "com.wa.server",
+    "productName": "ZapMax Server",
+    "copyright": "Copyright © 2026",
+    "directories": {
+        "output": "dist/server"
+    },
+    "files": [
+        "apps/server/**/*",
+        "apps/client/**/*",
+        "server/**/*",
+        "public/**/*",
+        "node_modules/**/*",
+        "Icon/**/*",
+        "!**/node_modules/*/{test,tests,samples,examples,example}/**/*",
+        "!**/node_modules/*/.*"
+    ],
+    "extraMetadata": {
+        "main": "apps/server/index.js"
+    },
+    "win": {
+        "target": "dir",
+        "publish": null,
+        "icon": "Icon/logo.png"
+    },
+    "nodeGypRebuild": false,
+    "npmRebuild": false,
+    "asar": false
+}

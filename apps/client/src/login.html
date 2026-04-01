@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZapMax – Login</title>
+    <link rel="icon" href="../../Icon/zapmaxicon.ico" type="image/x-icon">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --primary: #25d366;
+            --primary-dark: #1aaa52;
+            --bg: #0d1117;
+            --surface: #161b22;
+            --surface2: #21262d;
+            --border: #30363d;
+            --text-1: #f0f6fc;
+            --text-2: #8b949e;
+            --danger: #f85149;
+        }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', sans-serif;
+            background: var(--bg);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* Ambient glow background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -30%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 700px;
+            height: 700px;
+            background: radial-gradient(circle, rgba(37, 211, 102, .12) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .login-wrap {
+            width: 100%;
+            max-width: 420px;
+            padding: 24px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Logo area */
+        .brand {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 36px;
+            animation: fadeDown .5s ease both;
+        }
+
+        .brand-icon {
+            width: 68px;
+            height: 68px;
+            background: linear-gradient(135deg, #25d366 0%, #075e54 100%);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 34px;
+            box-shadow: 0 8px 32px rgba(37, 211, 102, .3);
+        }
+
+        .brand-name {
+            font-size: 1.7rem;
+            font-weight: 700;
+            color: var(--text-1);
+            letter-spacing: -.5px;
+        }
+
+        .brand-name span {
+            color: var(--primary);
+        }
+
+        .brand-sub {
+            font-size: .82rem;
+            color: var(--text-2);
+            font-weight: 400;
+        }
+
+        /* Card */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px 28px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, .4);
+            animation: fadeUp .5s ease .1s both;
+        }
+
+        .card-title {
+            font-size: .95rem;
+            font-weight: 600;
+            color: var(--text-1);
+            margin-bottom: 24px;
+        }
+
+        /* Fields */
+        .field {
+            margin-bottom: 16px;
+        }
+
+        .field label {
+            display: block;
+            font-size: .78rem;
+            font-weight: 500;
+            color: var(--text-2);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+
+        .input-wrap {
+            position: relative;
+        }
+
+        .input-wrap input {
+            width: 100%;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 40px 12px 14px;
+            font-size: .92rem;
+            font-family: inherit;
+            color: var(--text-1);
+            outline: none;
+            transition: border-color .2s, box-shadow .2s;
+        }
+
+        .input-wrap input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 211, 102, .15);
+        }
+
+        .input-wrap input::placeholder {
+            color: #484f58;
+        }
+
+        .input-wrap .field-icon {
+            position: absolute;
+            right: 13px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-2);
+            font-size: .85rem;
+            cursor: pointer;
+            user-select: none;
+            transition: color .2s;
+        }
+
+        .input-wrap .field-icon:hover {
+            color: var(--text-1);
+        }
+
+        /* Remember me */
+        .remember-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 22px;
+        }
+
+        .remember-row input[type=checkbox] {
+            width: 15px;
+            height: 15px;
+            accent-color: var(--primary);
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .remember-row label {
+            font-size: .82rem;
+            color: var(--text-2);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        /* Submit */
+        .btn-login {
+            width: 100%;
+            padding: 13px;
+            background: linear-gradient(135deg, #25d366 0%, #1aaa52 100%);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: .95rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: opacity .2s, transform .1s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-login:hover {
+            opacity: .92;
+        }
+
+        .btn-login:active {
+            transform: scale(.98);
+        }
+
+        .btn-login:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        .btn-login .btn-spinner {
+            display: none;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, .4);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+
+        .btn-login.loading .btn-spinner {
+            display: inline-block;
+        }
+
+        .btn-login.loading .btn-label {
+            opacity: .7;
+        }
+
+        /* Error */
+        .error-msg {
+            display: none;
+            background: rgba(248, 81, 73, .12);
+            border: 1px solid rgba(248, 81, 73, .35);
+            color: var(--danger);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: .82rem;
+            margin-top: 14px;
+            line-height: 1.5;
+        }
+
+        .error-msg.show {
+            display: block;
+        }
+
+        /* Animations */
+        @keyframes fadeDown {
+            from {
+                opacity: 0;
+                transform: translateY(-16px);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(16px);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-wrap">
+        <div class="brand">
+            <div class="brand-icon">💬</div>
+            <div>
+                <div class="brand-name">Zap<span>Max</span></div>
+                <div class="brand-sub">Plataforma de Atendimento WhatsApp</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Acesse sua estação de trabalho</div>
+
+            <div class="field">
+                <label>IP do Servidor</label>
+                <div class="input-wrap">
+                    <input type="text" id="server-ip" placeholder="Ex: 192.168.1.10 ou localhost" autocomplete="off">
+                    <span class="field-icon">🌐</span>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Usuário</label>
+                <div class="input-wrap">
+                    <input type="text" id="username" placeholder="Seu usuário" autocomplete="username">
+                    <span class="field-icon">👤</span>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Senha</label>
+                <div class="input-wrap">
+                    <input type="password" id="password" placeholder="Sua senha" autocomplete="current-password">
+                    <span class="field-icon" id="toggle-pass" title="Mostrar/ocultar senha">👁</span>
+                </div>
+            </div>
+
+            <div class="remember-row">
+                <input type="checkbox" id="remember-me">
+                <label for="remember-me">Lembrar meus dados de acesso</label>
+            </div>
+
+            <button class="btn-login" id="login-btn">
+                <span class="btn-spinner"></span>
+                <span class="btn-label">Entrar na Estação</span>
+            </button>
+
+            <div class="error-msg" id="error"></div>
+        </div>
+    </div>
+
+    <script>
+        // ── Restore saved credentials ─────────────────────────────
+        async function restoreCredentials() {
+            try {
+                // Use IPC (Electron) when available — persists across builds
+                const saved = window.api ? await window.api.loadCredentials() : JSON.parse(localStorage.getItem('wa_saved_login') || 'null');
+                if (saved && saved.remember) {
+                    document.getElementById('server-ip').value = saved.ip || '';
+                    document.getElementById('username').value = saved.user || '';
+                    document.getElementById('password').value = saved.pass || '';
+                    document.getElementById('remember-me').checked = true;
+                } else {
+                    // Pre-fill just the IP from last session
+                    const lastIp = saved?.ip || localStorage.getItem('wa_server');
+                    if (lastIp) document.getElementById('server-ip').value = lastIp.split(':')[0];
+                }
+            } catch (e) { console.warn('Could not load credentials:', e); }
+        }
+        restoreCredentials();
+
+        // ── Toggle password visibility ────────────────────────────
+        document.getElementById('toggle-pass').onclick = () => {
+            const pw = document.getElementById('password');
+            const icon = document.getElementById('toggle-pass');
+            if (pw.type === 'password') { pw.type = 'text'; icon.textContent = '🙈'; }
+            else { pw.type = 'password'; icon.textContent = '👁'; }
+        };
+
+        // ── Login ─────────────────────────────────────────────────
+        async function doLogin() {
+            const ip = document.getElementById('server-ip').value.trim();
+            const user = document.getElementById('username').value.trim();
+            const pass = document.getElementById('password').value;
+            const remember = document.getElementById('remember-me').checked;
+            const errorEl = document.getElementById('error');
+            const btn = document.getElementById('login-btn');
+
+            errorEl.classList.remove('show');
+
+            if (!ip || !user || !pass) {
+                errorEl.textContent = 'Preencha todos os campos.';
+                errorEl.classList.add('show');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.classList.add('loading');
+            btn.querySelector('.btn-label').textContent = 'Entrando...';
+
+            try {
+                const [host, port] = ip.includes(':') ? ip.split(':') : [ip, '3001'];
+                const res = await fetch(`http://${host}:${port}/api/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: user, password: pass })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    // Save or clear credentials via IPC (falls back to localStorage)
+                    const credData = remember
+                        ? { ip, user, pass, remember: true }
+                        : { ip, remember: false }; // keep IP even when not remembering password
+                    if (window.api) await window.api.saveCredentials(credData);
+                    else {
+                        if (remember) localStorage.setItem('wa_saved_login', JSON.stringify(credData));
+                        else localStorage.removeItem('wa_saved_login');
+                    }
+                    localStorage.setItem('wa_token', data.token);
+                    localStorage.setItem('wa_server', `${host}:${port}`);
+                    localStorage.setItem('wa_user', JSON.stringify(data.user));
+                    window.location.href = 'chat.html';
+                } else {
+                    errorEl.textContent = data.message || 'Credenciais inválidas.';
+                    errorEl.classList.add('show');
+                }
+            } catch (e) {
+                errorEl.textContent = `Erro ao conectar em "${ip}". Verifique o IP e se o servidor está rodando.`;
+                errorEl.classList.add('show');
+            } finally {
+                btn.disabled = false;
+                btn.classList.remove('loading');
+                btn.querySelector('.btn-label').textContent = 'Entrar na Estação';
+            }
+        }
+
+        document.getElementById('login-btn').onclick = doLogin;
+        // Allow Enter key on any field
+        ['server-ip', 'username', 'password'].forEach(id =>
+            document.getElementById(id).addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); })
+        );
+    </script>
+</body>
+
+</html>

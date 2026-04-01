@@ -1,0 +1,89 @@
+:root {
+    --primary: #25d366;
+    --primary-dark: #075e54;
+    --bg-dark: #111b21;
+    --bg-sidebar: #202c33;
+    --text-main: #e9edef;
+    --text-secondary: #8696a0;
+    --accent: #00a884;
+    --danger: #f15c6d;
+}
+
+body {
+    margin: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+}
+
+.container {
+    padding: 40px;
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 40px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    padding-bottom: 20px;
+}
+
+h1 {
+    font-weight: 300;
+    margin: 0;
+}
+
+.status-badge {
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.offline { background: #333; color: #888; }
+.waiting { background: #e19500; color: white; }
+.online { background: var(--primary); color: white; }
+
+.qr-container {
+    background: white;
+    padding: 30px;
+    border-radius: 12px;
+    text-align: center;
+    color: #333;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+.qr-container p { margin-bottom: 20px; font-weight: 600; }
+.qr-container .instruction { margin-top: 20px; font-size: 0.9rem; color: #777; }
+
+#qrcode { display: inline-block; }
+
+.ready-container {
+    text-align: center;
+    padding: 60px;
+    background: var(--bg-sidebar);
+    border-radius: 12px;
+}
+
+.success-icon {
+    font-size: 80px;
+    margin-bottom: 20px;
+}
+
+.server-info {
+    margin-top: 30px;
+    padding: 20px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+}
+
+#server-url {
+    color: var(--primary);
+    font-family: monospace;
+    font-size: 1.1rem;
+}
+
+.hidden { display: none; }

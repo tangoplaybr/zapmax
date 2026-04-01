@@ -1,0 +1,1565 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WA Central – Painel do Servidor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --surface2: #1c2230;
+            --border: #30363d;
+            --accent: #25d366;
+            --warn: #f0a500;
+            --danger: #f15c6d;
+            --text: #e6edf3;
+            --muted: #8b949e;
+            --radius: 12px;
+        }
+
+        html,
+        body {
+            height: 100%;
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        /* ── Layout ── */
+        .layout {
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 230px;
+            flex-shrink: 0;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 0;
+        }
+
+        .sidebar-logo {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--accent);
+            padding: 22px 20px;
+            border-bottom: 1px solid var(--border);
+            letter-spacing: -0.4px;
+        }
+
+        .sidebar-logo span {
+            color: #fff;
+        }
+
+        .nav {
+            padding: 12px 0;
+            flex: 1;
+        }
+
+        .nav-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            background: none;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            text-align: left;
+            padding: 10px 20px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: color .2s, background .2s;
+            position: relative;
+        }
+
+        .nav-btn:hover {
+            color: var(--text);
+            background: rgba(255, 255, 255, .04);
+        }
+
+        .nav-btn.active {
+            color: var(--accent);
+            background: rgba(37, 211, 102, .08);
+        }
+
+        .nav-btn.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 4px;
+            bottom: 4px;
+            width: 3px;
+            background: var(--accent);
+            border-radius: 0 2px 2px 0;
+        }
+
+        .main {
+            flex: 1;
+            overflow-y: auto;
+            padding: 32px 36px;
+        }
+
+        .page-title {
+            font-size: 1.35rem;
+            font-weight: 700;
+            margin-bottom: 24px;
+        }
+
+        /* ── Cards ── */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 22px;
+        }
+
+        .card-title {
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 16px;
+        }
+
+        /* ── Tabs ── */
+        #whatsapp-tab,
+        #admin-tab {
+            display: none;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        #whatsapp-tab.active,
+        #admin-tab.active {
+            display: flex;
+        }
+
+        /* ── WA Status card ── */
+        .status-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 18px 22px;
+        }
+
+        .status-dot {
+            width: 13px;
+            height: 13px;
+            border-radius: 50%;
+            background: var(--muted);
+            flex-shrink: 0;
+            transition: background .3s, box-shadow .3s;
+        }
+
+        .status-dot.online {
+            background: var(--accent);
+            box-shadow: 0 0 8px var(--accent);
+        }
+
+        .status-dot.waiting {
+            background: var(--warn);
+            box-shadow: 0 0 6px var(--warn);
+            animation: blink 1.3s ease-in-out infinite;
+        }
+
+        .status-dot.recon {
+            background: var(--warn);
+            animation: blink .6s linear infinite;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: .3
+            }
+        }
+
+        .status-info {
+            flex: 1;
+        }
+
+        .status-label {
+            font-size: .98rem;
+            font-weight: 600;
+        }
+
+        .status-sub {
+            font-size: .8rem;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+
+        /* action buttons row next to status */
+        .status-actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .btn-warn,
+        .btn-danger {
+            border-radius: 8px;
+            padding: 7px 14px;
+            cursor: pointer;
+            font-size: .82rem;
+            font-weight: 600;
+            border: 1px solid;
+            transition: background .2s, transform .1s;
+            white-space: nowrap;
+        }
+
+        .btn-warn {
+            background: rgba(240, 165, 0, .12);
+            border-color: rgba(240, 165, 0, .35);
+            color: var(--warn);
+        }
+
+        .btn-warn:hover {
+            background: rgba(240, 165, 0, .22);
+        }
+
+        .btn-danger {
+            background: rgba(241, 92, 109, .12);
+            border-color: rgba(241, 92, 109, .35);
+            color: var(--danger);
+        }
+
+        .btn-danger:hover {
+            background: rgba(241, 92, 109, .22);
+        }
+
+        .btn-warn:disabled,
+        .btn-danger:disabled {
+            opacity: .45;
+            cursor: not-allowed;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* ── Stats row ── */
+        .stats-row {
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        .stat-box {
+            flex: 1 1 150px;
+            background: rgba(37, 211, 102, .06);
+            border: 1px solid rgba(37, 211, 102, .18);
+            border-radius: 10px;
+            padding: 13px 16px;
+        }
+
+        .stat-box .sl {
+            font-size: .7rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            margin-bottom: 4px;
+        }
+
+        .stat-box .sv {
+            font-size: .95rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        /* ── Banner ── */
+        .banner {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 13px 18px;
+            border-radius: 10px;
+            font-size: .88rem;
+        }
+
+        .banner.warn {
+            background: rgba(240, 165, 0, .08);
+            border: 1px solid rgba(240, 165, 0, .22);
+            color: var(--warn);
+        }
+
+        .banner.info {
+            background: rgba(37, 211, 102, .07);
+            border: 1px solid rgba(37, 211, 102, .18);
+            color: var(--accent);
+        }
+
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            border: 2px solid rgba(240, 165, 0, .3);
+            border-top-color: var(--warn);
+            animation: spin .7s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ── QR ── */
+        .qr-card {
+            align-items: center;
+            padding: 30px;
+            gap: 14px;
+        }
+
+        .qr-card p {
+            color: var(--muted);
+            font-size: .85rem;
+            text-align: center;
+            max-width: 280px;
+            line-height: 1.5;
+        }
+
+        #qrcode {
+            background: #fff;
+            padding: 16px;
+            border-radius: 12px;
+            display: inline-block;
+        }
+
+        #qrcode canvas,
+        #qrcode img {
+            border-radius: 6px;
+            display: block;
+        }
+
+        /* ── Admin grid ── */
+        .admin-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 18px;
+        }
+
+        @media(max-width:700px) {
+            .admin-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .span-all {
+            grid-column: 1 / -1;
+        }
+
+        /* ── Forms ── */
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+        }
+
+        label.field-label {
+            font-size: .78rem;
+            color: var(--muted);
+        }
+
+        input[type="text"],
+        input[type="password"] {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 8px;
+            padding: 8px 13px;
+            font-size: .875rem;
+            transition: border-color .2s;
+            width: 100%;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            padding: 9px 18px;
+            font-size: .85rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background .2s;
+        }
+
+        .btn-primary:hover {
+            background: #1eba58;
+        }
+
+        .form-msg {
+            font-size: .8rem;
+            margin-top: 4px;
+            min-height: 1rem;
+        }
+
+        .form-msg.ok {
+            color: var(--accent);
+        }
+
+        .form-msg.err {
+            color: var(--danger);
+        }
+
+        /* ── Attendant table ── */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: .85rem;
+        }
+
+        th {
+            color: var(--muted);
+            font-weight: 600;
+            text-align: left;
+            padding: 7px 10px;
+            border-bottom: 1px solid var(--border);
+            font-size: .75rem;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+
+        td {
+            padding: 10px;
+            border-bottom: 1px solid rgba(48, 54, 61, .5);
+            vertical-align: middle;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, .02);
+        }
+
+        .badge-role {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 99px;
+            font-size: .72rem;
+            font-weight: 600;
+        }
+
+        .badge-role.admin {
+            background: rgba(240, 165, 0, .15);
+            color: var(--warn);
+        }
+
+        .badge-role.att {
+            background: rgba(37, 211, 102, .12);
+            color: var(--accent);
+        }
+
+        .row-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .act-btn {
+            font-size: .75rem;
+            font-weight: 600;
+            border-radius: 6px;
+            padding: 4px 10px;
+            cursor: pointer;
+            border: 1px solid;
+            transition: background .2s;
+        }
+
+        .act-btn.edit {
+            background: rgba(37, 211, 102, .1);
+            border-color: rgba(37, 211, 102, .25);
+            color: var(--accent);
+        }
+
+        .act-btn.edit:hover {
+            background: rgba(37, 211, 102, .2);
+        }
+
+        .act-btn.del {
+            background: rgba(241, 92, 109, .1);
+            border-color: rgba(241, 92, 109, .25);
+            color: var(--danger);
+        }
+
+        .act-btn.del:hover {
+            background: rgba(241, 92, 109, .2);
+        }
+
+        /* ── Modal ── */
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, .6);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+        }
+
+        .modal {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px;
+            width: 380px;
+            max-width: 95vw;
+        }
+
+        .modal h3 {
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: 18px;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        .btn-ghost {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            border-radius: 8px;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: .85rem;
+            transition: border-color .2s;
+        }
+
+        .btn-ghost:hover {
+            border-color: var(--text);
+            color: var(--text);
+        }
+
+        /* ── Toggle switch ── */
+        .toggle-wrap {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toggle {
+            position: relative;
+            width: 36px;
+            height: 20px;
+            flex-shrink: 0;
+        }
+
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            inset: 0;
+            background: var(--border);
+            border-radius: 99px;
+            cursor: pointer;
+            transition: background .25s;
+        }
+
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            left: 3px;
+            top: 3px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #fff;
+            transition: transform .25s;
+        }
+
+        .toggle input:checked+.toggle-slider {
+            background: var(--accent);
+        }
+
+        .toggle input:checked+.toggle-slider::before {
+            transform: translateX(16px);
+        }
+
+        /* ── Rule badge types ── */
+        .badge-ext {
+            background: rgba(59, 130, 246, .12);
+            color: #60a5fa;
+        }
+
+        .badge-kw {
+            background: rgba(168, 85, 247, .12);
+            color: #c084fc;
+        }
+
+        .rule-msg {
+            font-size: .78rem;
+            color: var(--muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 260px;
+        }
+
+        /* ── DB stats mini card ── */
+        .stat-mini {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .stat-mini-val {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--accent);
+            line-height: 1;
+        }
+
+        .stat-mini-lbl {
+            font-size: .72rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: .4px;
+        }
+    </style>
+
+</head>
+
+<body>
+    <div class="layout">
+
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-logo">WA <span>Central</span></div>
+            <nav class="nav">
+                <button class="nav-btn active" id="nav-wa" onclick="showTab('wa')">🔗 Conexão WhatsApp</button>
+                <button class="nav-btn" id="nav-admin" onclick="showTab('admin')">⚙️ Painel Admin</button>
+                <button class="nav-btn" id="nav-db" onclick="showTab('db')">🗄 Banco de Dados</button>
+            </nav>
+        </aside>
+
+        <!-- Main -->
+        <main class="main">
+
+            <!-- ── WhatsApp Tab ───────────────────────────────── -->
+            <section id="whatsapp-tab" class="active">
+                <h1 class="page-title">Status da Conexão</h1>
+
+                <!-- Status card -->
+                <div class="card status-header">
+                    <div class="status-dot" id="status-dot"></div>
+                    <div class="status-info">
+                        <div class="status-label" id="status-label">Inicializando…</div>
+                        <div class="status-sub" id="status-sub">Aguarde o sistema carregar</div>
+                    </div>
+                    <div class="status-actions">
+                        <button class="btn-danger hidden" id="btn-disconnect" onclick="doDisconnect()">⏏
+                            Desconectar</button>
+                        <button class="btn-warn   hidden" id="btn-reconnect" onclick="doReconnect()">↺
+                            Reconectar</button>
+                        <button class="btn-warn" id="btn-reset-session" onclick="doResetSession()"
+                            title="Use quando o servidor ficar preso em 'inicializando'. Apaga a sessão WA sem tocar no banco.">🧹
+                            Reset Sessão</button>
+                    </div>
+                </div>
+
+                <!-- Stats -->
+                <div class="stats-row hidden" id="stats-row">
+                    <div class="stat-box">
+                        <div class="sl">📱 Número</div>
+                        <div class="sv" id="stat-number">—</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="sl">⏱ Uptime</div>
+                        <div class="sv" id="stat-uptime">—</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="sl">📅 Conectado desde</div>
+                        <div class="sv" id="stat-since">—</div>
+                    </div>
+                </div>
+
+                <!-- Banners -->
+                <div class="banner warn hidden" id="banner-recon">
+                    <div class="spinner"></div>
+                    Reconectando automaticamente — aguarde o novo QR…
+                </div>
+                <div class="banner info hidden" id="banner-auth">
+                    <div class="spinner" style="border-color:rgba(37,211,102,.3);border-top-color:var(--accent)"></div>
+                    Autenticado — sincronizando dados com o WhatsApp…
+                </div>
+
+                <!-- QR -->
+                <div class="card qr-card hidden" id="qr-container">
+                    <div id="qrcode"></div>
+                    <p>Abra o WhatsApp → Dispositivos conectados → Conectar dispositivo → Escaneie o QR acima</p>
+                </div>
+            </section>
+
+            <!-- ── Admin Tab ──────────────────────────────────── -->
+            <section id="admin-tab">
+                <h1 class="page-title">Gerenciamento</h1>
+                <div class="admin-grid">
+
+                    <!-- Company settings -->
+                    <div class="card">
+                        <div class="card-title">⚙️ Configurações</div>
+                        <form id="config-form">
+                            <label class="field-label">Nome da Empresa</label>
+                            <input type="text" id="company-name" placeholder="Ex: Gráfica Rápida" required>
+                            <button type="submit" class="btn-primary">Salvar</button>
+                        </form>
+                        <div class="form-msg ok" id="config-msg"></div>
+                    </div>
+
+                    <!-- New attendant -->
+                    <div class="card">
+                        <div class="card-title">👤 Novo Atendente</div>
+                        <form id="add-form">
+                            <label class="field-label">Usuário (login)</label>
+                            <input type="text" id="new-user" placeholder="usuario123" required>
+                            <label class="field-label">Senha</label>
+                            <input type="password" id="new-pass" placeholder="Senha segura" required>
+                            <label class="field-label">Nome completo</label>
+                            <input type="text" id="new-name" placeholder="João da Silva" required>
+                            <button type="submit" class="btn-primary">Cadastrar</button>
+                        </form>
+                        <div class="form-msg err" id="add-msg"></div>
+                    </div>
+
+                    <!-- Attendant list -->
+                    <div class="card span-all">
+                        <div class="card-title">👥 Atendentes Cadastrados</div>
+                        <table id="att-table">
+                            <thead>
+                                <tr>
+                                    <th>Nome</th>
+                                    <th>Usuário</th>
+                                    <th>Perfil</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="att-tbody"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- File Auto-Reply Rules -->
+                    <div class="card span-all">
+                        <div class="card-title">📎 Respostas Automáticas de Arquivo</div>
+
+                        <form id="file-rule-form" style="display:flex;flex-direction:column;gap:12px">
+                            <!-- Identification type -->
+                            <div>
+                                <label class="field-label" style="display:block;margin-bottom:8px">Identificação do
+                                    arquivo</label>
+                                <div style="display:flex;gap:20px">
+                                    <label
+                                        style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85rem">
+                                        <input type="radio" name="fr-type" value="file_extension" checked
+                                            style="accent-color:var(--accent)"> Tipo de arquivo
+                                    </label>
+                                    <label
+                                        style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85rem">
+                                        <input type="radio" name="fr-type" value="filename_keyword"
+                                            style="accent-color:var(--accent)"> Contém no nome
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Trigger value -->
+                            <div>
+                                <label class="field-label" id="fr-trigger-label">Extensão (sem ponto)</label>
+                                <input type="text" id="fr-trigger" placeholder="ex: docx" required
+                                    style="margin-top:4px">
+                                <small style="color:var(--muted);font-size:.73rem" id="fr-trigger-hint">Exemplos: docx ·
+                                    xlsx · png</small>
+                            </div>
+
+                            <!-- Reply message -->
+                            <div>
+                                <label class="field-label">Informar ao cliente</label>
+                                <textarea id="fr-message" rows="3"
+                                    placeholder="Mensagem automática enviada quando o arquivo for recebido..."
+                                    style="margin-top:4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 13px;font-size:.875rem;font-family:inherit;resize:vertical;width:100%;box-sizing:border-box;transition:border-color .2s;outline:none"
+                                    onfocus="this.style.borderColor='var(--accent)'"
+                                    onblur="this.style.borderColor='var(--border)'" required></textarea>
+                            </div>
+
+                            <div style="display:flex;justify-content:flex-end">
+                                <button type="submit" class="btn-primary">+ Adicionar Regra</button>
+                            </div>
+                            <div class="form-msg err" id="fr-msg"></div>
+                        </form>
+
+                        <!-- Rules list -->
+                        <div id="fr-list" style="margin-top:18px"></div>
+                    </div>
+
+                    <!-- Canned Responses (Quick Replies via "/") -->
+                    <div class="card span-all">
+                        <div class="card-title">⚡ Respostas Rápidas <span
+                                style="font-size:.75rem;font-weight:400;color:var(--muted)">(atalho "/" no chat)</span>
+                        </div>
+
+                        <form id="canned-form" style="display:flex;flex-direction:column;gap:12px">
+                            <div>
+                                <label class="field-label">Título / Atalho</label>
+                                <input type="text" id="canned-title" placeholder='ex: "saudacao" ou "horario"' required
+                                    style="margin-top:4px">
+                                <small style="color:var(--muted);font-size:.73rem">O atendente digita "/" e filtra pelo
+                                    título para inserir a resposta</small>
+                            </div>
+                            <div>
+                                <label class="field-label">Texto da resposta</label>
+                                <textarea id="canned-content" rows="3"
+                                    placeholder="Olá! Bem-vindo à nossa loja. Como posso ajudar?"
+                                    style="margin-top:4px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 13px;font-size:.875rem;font-family:inherit;resize:vertical;width:100%;box-sizing:border-box;transition:border-color .2s;outline:none"
+                                    onfocus="this.style.borderColor='var(--accent)'"
+                                    onblur="this.style.borderColor='var(--border)'" required></textarea>
+                            </div>
+                            <div style="display:flex;justify-content:flex-end">
+                                <button type="submit" class="btn-primary">+ Adicionar Resposta</button>
+                            </div>
+                            <div class="form-msg err" id="canned-msg"></div>
+                        </form>
+
+                        <div id="canned-admin-list" style="margin-top:18px"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── DB Maintenance Tab ──────────────────────────────── -->
+            <section id="db-tab" style="display:none">
+                <h1 class="page-title">🗄 Banco de Dados</h1>
+
+                <!-- Stats card -->
+                <div class="card span-all">
+                    <div class="card-title">📊 Uso Atual
+                        <button onclick="loadDbStats()"
+                            style="margin-left:12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:3px 10px;font-size:.78rem;cursor:pointer">↺
+                            Atualizar</button>
+                    </div>
+                    <div id="db-stats-box" style="color:var(--muted);font-size:.85rem;padding:8px 0">Clique em
+                        "Atualizar" para carregar estatísticas.</div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:0">
+
+                    <!-- Purge media blobs -->
+                    <div class="card">
+                        <div class="card-title">🗑 Limpar Mídias (base64)</div>
+                        <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px;line-height:1.5">
+                            Remove os <strong style="color:var(--text)">dados binários</strong> das imagens, PDFs e
+                            vídeos mais antigos que N dias.<br>
+                            O texto, nome do arquivo e tipo são mantidos. As mensagens continuam no histórico.
+                        </p>
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                            <label style="font-size:.82rem;color:var(--muted);white-space:nowrap">Mais antigos
+                                que</label>
+                            <input type="number" id="db-purge-media-days" value="7" min="1" max="365"
+                                style="width:70px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:5px 10px;font-size:.85rem;text-align:center">
+                            <label style="font-size:.82rem;color:var(--muted)">dias</label>
+                        </div>
+                        <button id="btn-purge-media" onclick="runPurgeMedia()"
+                            style="background:#7f1d1d;border:1px solid #991b1b;color:#fca5a5;border-radius:8px;padding:8px 18px;font-size:.85rem;cursor:pointer;font-weight:600">
+                            🗑 Limpar Mídias
+                        </button>
+                    </div>
+
+                    <!-- Purge old finished chats -->
+                    <div class="card" style="border-color:rgba(239,68,68,.25)">
+                        <div class="card-title" style="color:var(--danger)">💣 Apagar Chats Antigos</div>
+                        <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px;line-height:1.5">
+                            <strong style="color:var(--danger)">⚠️ Irreversível.</strong> Apaga permanentemente chats
+                            com status <strong style="color:var(--text)">finalizado</strong> mais antigos que N dias,
+                            incluindo todas as mensagens, eventos e reações.<br>
+                            Chats <em>em espera</em> e <em>em atendimento</em> nunca são afetados.
+                        </p>
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                            <label style="font-size:.82rem;color:var(--muted);white-space:nowrap">Finalizados há mais
+                                de</label>
+                            <input type="number" id="db-purge-chat-days" value="30" min="7" max="365"
+                                onchange="loadDbStats()"
+                                style="width:70px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:5px 10px;font-size:.85rem;text-align:center">
+                            <label style="font-size:.82rem;color:var(--muted)">dias</label>
+                        </div>
+                        <button id="btn-purge-chats" onclick="runPurgeChats()"
+                            style="background:#7f1d1d;border:1px solid #991b1b;color:#fca5a5;border-radius:8px;padding:8px 18px;font-size:.85rem;cursor:pointer;font-weight:600">
+                            💣 Apagar Chats Antigos
+                        </button>
+                    </div>
+                </div>
+
+                <!-- VACUUM -->
+                <div class="card span-all" style="margin-top:0">
+                    <div class="card-title">⚡ VACUUM — Compactar banco</div>
+                    <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px;line-height:1.5">
+                        Após qualquer limpeza acima, o SQLite libera páginas internamente mas o <strong
+                            style="color:var(--text)">arquivo em disco não encolhe</strong> até o VACUUM ser
+                        executado.<br>
+                        O banco fica brevemente bloqueado durante a operação (segundos a minutos conforme o tamanho).
+                    </p>
+                    <button id="btn-vacuum" onclick="runVacuum()"
+                        style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);border-radius:8px;padding:8px 18px;font-size:.85rem;cursor:pointer;font-weight:600">
+                        ⚡ VACUUM (Compactar)
+                    </button>
+                </div>
+
+                <!-- Action messages -->
+                <div class="card span-all" style="margin-top:0">
+                    <div id="db-action-msg" style="font-size:.85rem;min-height:20px"></div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- ── Edit Modal ── -->
+    <div class="modal-backdrop hidden" id="edit-modal">
+        <div class="modal">
+            <h3>✏️ Editar Atendente</h3>
+            <form id="edit-form">
+                <input type="hidden" id="edit-id">
+                <label class="field-label">Nome completo</label>
+                <input type="text" id="edit-name" placeholder="Nome" required>
+                <label class="field-label">Nova senha <span style="color:var(--muted);font-weight:400">(deixe em branco
+                        para manter)</span></label>
+                <input type="password" id="edit-pass" placeholder="Nova senha (opcional)">
+                <div class="form-msg err" id="edit-msg"></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-ghost" onclick="closeEditModal()">Cancelar</button>
+                    <button type="submit" class="btn-primary">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
+    <script>
+        // ── Tab navigation ──────────────────────────────────────────────────────────
+        function showTab(tab) {
+            document.getElementById('whatsapp-tab').classList.toggle('active', tab === 'wa');
+            document.getElementById('admin-tab').classList.toggle('active', tab === 'admin');
+            const dbTab = document.getElementById('db-tab');
+            if (dbTab) dbTab.style.display = tab === 'db' ? '' : 'none';
+            document.getElementById('nav-wa').classList.toggle('active', tab === 'wa');
+            document.getElementById('nav-admin').classList.toggle('active', tab === 'admin');
+            const navDb = document.getElementById('nav-db');
+            if (navDb) navDb.classList.toggle('active', tab === 'db');
+            if (tab === 'admin') { loadAttendants(); loadConfig(); loadFileRules(); loadCannedAdmin(); }
+            if (tab === 'db') { loadDbStats(); }
+        }
+
+
+        // ── DOM refs ────────────────────────────────────────────────────────────────
+        const dot = document.getElementById('status-dot');
+        const lbl = document.getElementById('status-label');
+        const sub = document.getElementById('status-sub');
+        const btnDisconnect = document.getElementById('btn-disconnect');
+        const btnReconnect = document.getElementById('btn-reconnect');
+        const statsRow = document.getElementById('stats-row');
+        const bannerRecon = document.getElementById('banner-recon');
+        const bannerAuth = document.getElementById('banner-auth');
+        const qrContainer = document.getElementById('qr-container');
+        const qrDiv = document.getElementById('qrcode');
+
+        // ── State ───────────────────────────────────────────────────────────────────
+        let connectedSince = null;
+        let uptimeTimer = null;
+
+        // ── UI State setters ─────────────────────────────────────────────────────────
+        function setConnected({ connectedAt, connectedNumber } = {}) {
+            dot.className = 'status-dot online';
+            lbl.textContent = '✔ Conectado';
+            sub.textContent = 'WhatsApp ativo e recebendo mensagens';
+            btnDisconnect.classList.remove('hidden');
+            btnReconnect.classList.remove('hidden');
+            btnDisconnect.disabled = false;
+            btnReconnect.disabled = false;
+            statsRow.classList.remove('hidden');
+            bannerRecon.classList.add('hidden');
+            bannerAuth.classList.add('hidden');
+            qrContainer.classList.add('hidden');
+
+            if (connectedNumber) {
+                const raw = connectedNumber.replace(/@.*$/, '');
+                document.getElementById('stat-number').textContent = '+' + raw;
+            }
+            if (connectedAt) {
+                connectedSince = new Date(connectedAt);
+                document.getElementById('stat-since').textContent =
+                    connectedSince.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                startUptime();
+            }
+        }
+
+        function setWaiting() {
+            dot.className = 'status-dot waiting';
+            lbl.textContent = 'Aguardando scan…';
+            sub.textContent = 'Escaneie o QR abaixo no celular';
+            btnDisconnect.classList.add('hidden');
+            btnReconnect.classList.add('hidden');
+            statsRow.classList.add('hidden');
+            bannerRecon.classList.add('hidden');
+            bannerAuth.classList.add('hidden');
+            qrContainer.classList.remove('hidden');
+            stopUptime();
+        }
+
+        function setReconnecting() {
+            dot.className = 'status-dot recon';
+            lbl.textContent = 'Reconectando…';
+            sub.textContent = 'Um novo QR será gerado em instantes';
+            btnDisconnect.classList.add('hidden');
+            btnReconnect.classList.add('hidden');
+            statsRow.classList.add('hidden');
+            bannerRecon.classList.remove('hidden');
+            bannerAuth.classList.add('hidden');
+            qrContainer.classList.add('hidden');
+            stopUptime();
+        }
+
+        function setDisconnected() {
+            dot.className = 'status-dot';
+            lbl.textContent = 'Desconectado';
+            sub.textContent = 'Use o botão Reconectar para gerar um novo QR';
+            btnDisconnect.classList.add('hidden');
+            btnReconnect.classList.remove('hidden');
+            btnReconnect.disabled = false;
+            statsRow.classList.add('hidden');
+            bannerRecon.classList.add('hidden');
+            bannerAuth.classList.add('hidden');
+            stopUptime();
+        }
+
+        // ── Uptime timer ─────────────────────────────────────────────────────────────
+        function startUptime() {
+            stopUptime();
+            const el = document.getElementById('stat-uptime');
+            function tick() {
+                if (!connectedSince) return;
+                const s = Math.floor((Date.now() - connectedSince) / 1000);
+                const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+                el.textContent = h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m ${String(ss).padStart(2, '0')}s`;
+            }
+            tick(); uptimeTimer = setInterval(tick, 1000);
+        }
+        function stopUptime() {
+            if (uptimeTimer) { clearInterval(uptimeTimer); uptimeTimer = null; }
+            connectedSince = null;
+            document.getElementById('stat-uptime').textContent = '—';
+        }
+
+        // ── QR ───────────────────────────────────────────────────────────────────────
+        function renderQR(qr) {
+            clearTimeout(_qrFallbackTimer); // QR arrived, cancel fallback timer
+            qrDiv.innerHTML = '';
+            new QRCode(qrDiv, { text: qr, width: 240, height: 240, correctLevel: QRCode.CorrectLevel.M });
+            setWaiting();
+        }
+
+        // ── Actions ───────────────────────────────────────────────────────────────────
+        let _qrFallbackTimer = null;
+        function startQRFallbackTimer() {
+            clearTimeout(_qrFallbackTimer);
+            _qrFallbackTimer = setTimeout(() => {
+                // If we still haven’t got a QR after 30s, give user a hint
+                if (!document.getElementById('qr-container').classList.contains('hidden')) return; // QR already showing
+                lbl.textContent = 'Aguardando QR…';
+                sub.textContent = 'Demora mais que o esperado. Tente “🧹 Reset Sessão” se o QR não aparecer.';
+            }, 30000);
+        }
+
+        async function doDisconnect() {
+            if (!confirm('Tem certeza? Isso encerrará a sessão do WhatsApp e exigirá escanear o QR novamente.')) return;
+            btnDisconnect.disabled = true; btnDisconnect.textContent = 'Aguarde…';
+            try {
+                await fetch('/api/wa-disconnect', { method: 'POST', headers: buildAdminHeaders() });
+            } catch (_) { }
+            setReconnecting();
+            startQRFallbackTimer();
+            setTimeout(() => { btnDisconnect.textContent = '⏏ Desconectar'; }, 5000);
+        }
+
+        async function doReconnect() {
+            btnReconnect.disabled = true; btnReconnect.textContent = 'Aguarde…';
+            try {
+                await fetch('/api/wa-reconnect', { method: 'POST', headers: buildAdminHeaders() });
+            } catch (_) { }
+            setReconnecting();
+            startQRFallbackTimer();
+            setTimeout(() => { btnReconnect.disabled = false; btnReconnect.textContent = '↺ Reconectar'; }, 5000);
+        }
+
+        async function doResetSession() {
+            if (!confirm('⚠️ RESET DE SESSÃO\n\nApaga a pasta wa_session e cria um novo cliente WhatsApp.\nO banco de dados NÃO é afetado.\n\nUse quando o servidor ficar preso em "inicializando".\n\nConfirmar?')) return;
+            const btn = document.getElementById('btn-reset-session');
+            btn.disabled = true; btn.textContent = 'Apagando…';
+            try {
+                await fetch('/api/wa-reset-session', { method: 'POST', headers: buildAdminHeaders() });
+            } catch (_) { }
+            setReconnecting();
+            // Update status text to reflect session wipe
+            lbl.textContent = 'Sessão resetada…';
+            sub.textContent = 'Aguarde o QR Code aparecer em alguns segundos';
+            setTimeout(() => { btn.disabled = false; btn.textContent = '🧹 Reset Sessão'; }, 8000);
+        }
+
+        function buildAdminHeaders() {
+            // admin panel uses bypass token — real password gate can be added later
+            return { 'Authorization': 'Bearer admin-bypass-or-login', 'Content-Type': 'application/json' };
+        }
+
+        // ── Socket ────────────────────────────────────────────────────────────────────
+        const socket = io(window.location.origin, { auth: { token: 'admin-bypass-or-login' } });
+
+        socket.on('whatsapp_qr', (qr) => renderQR(qr));
+        socket.on('whatsapp_authenticated', () => {
+            dot.className = 'status-dot waiting';
+            lbl.textContent = 'Autenticado…';
+            sub.textContent = 'Sincronizando dados com WhatsApp';
+            qrContainer.classList.add('hidden');
+            bannerRecon.classList.add('hidden');
+            bannerAuth.classList.remove('hidden');
+        });
+        socket.on('whatsapp_ready', (data = {}) => setConnected(data));
+        socket.on('whatsapp_initializing', () => {
+            // WA is loading (Puppeteer starting) — show clear loading state
+            dot.className = 'status-dot recon';
+            lbl.textContent = 'Inicializando WhatsApp…';
+            sub.textContent = 'O navegador interno está carregando, aguarde o QR aparecer';
+            qrContainer.classList.add('hidden');
+            bannerRecon.classList.remove('hidden');
+            bannerAuth.classList.add('hidden');
+        });
+        socket.on('wa_init_error', ({ message, attempt, maxAttempts } = {}) => {
+            // Puppeteer failed to start — auto-retry is happening in background
+            dot.className = 'status-dot recon';
+            const attemptInfo = attempt && maxAttempts ? ' (tentativa ' + attempt + '/' + maxAttempts + ')' : '';
+            lbl.textContent = 'Erro ao inicializar… Tentando novamente' + attemptInfo;
+            sub.textContent = 'O WhatsApp não conseguiu iniciar. Reconectando automaticamente. Se persistir, clique em “🧹 Reset Sessão”.';
+            bannerRecon.classList.remove('hidden');
+            qrContainer.classList.add('hidden');
+            console.warn('[WA] init_error:', message);
+        });
+        socket.on('wa_reconnect_failed', () => {
+            dot.className = 'status-dot';
+            lbl.textContent = 'Falha na inicialização';
+            sub.textContent = 'Não foi possível iniciar o WhatsApp após várias tentativas. Clique em “🧹 Reset Sessão”.';
+            bannerRecon.classList.add('hidden');
+            qrContainer.classList.add('hidden');
+            btnReconnect.classList.remove('hidden');
+            btnReconnect.disabled = false;
+        });
+        socket.on('whatsapp_disconnected', ({ reason, reconnecting } = {}) => {
+            qrDiv.innerHTML = '';
+            // For manual disconnects (reconnecting=false), we still show reconnecting state
+            // because disconnect() always creates a new client and a QR will arrive shortly.
+            if (reconnecting || reason === 'manual') {
+                setReconnecting();
+            } else {
+                setDisconnected();
+            }
+        });
+        socket.on('connect_error', () => setDisconnected());
+        socket.on('wa_debug', (msg) => console.log('%c[WA DEBUG]', 'color:#25d366;font-weight:bold', msg));
+        socket.on('connect', async () => {
+            try {
+                const r = await fetch('/api/wa-status');
+                const d = await r.json();
+                if (d.isReady) {
+                    setConnected(d);
+                } else if (d.lastQR) {
+                    // QR already generated but socket just connected (e.g. page refresh)
+                    renderQR(d.lastQR);
+                }
+                // If neither ready nor QR, the server will emit 'whatsapp_initializing'
+                // via socket on connection — nothing to do here
+            } catch (_) { }
+        });
+
+        // ── Admin: Config ────────────────────────────────────────────────────────────
+        async function loadConfig() {
+            const d = await (await fetch('/api/config')).json();
+            document.getElementById('company-name').value = d.company_name || '';
+        }
+        document.getElementById('config-form').onsubmit = async (e) => {
+            e.preventDefault();
+            await fetch('/api/config', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ company_name: document.getElementById('company-name').value.trim() })
+            });
+            const m = document.getElementById('config-msg');
+            m.textContent = '✔ Salvo com sucesso!';
+            setTimeout(() => m.textContent = '', 3000);
+        };
+
+        // ── Admin: Attendants ────────────────────────────────────────────────────────
+        async function loadAttendants() {
+            const list = await (await fetch('/api/attendants')).json();
+            const tbody = document.getElementById('att-tbody');
+            if (!list.length) {
+                tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);text-align:center;padding:20px">Nenhum atendente cadastrado</td></tr>';
+                return;
+            }
+            tbody.innerHTML = list.map(u => `
+        <tr>
+            <td><strong>${esc(u.name)}</strong></td>
+            <td style="color:var(--muted)">${esc(u.username)}</td>
+            <td><span class="badge-role ${u.role === 'admin' ? 'admin' : 'att'}">${u.role === 'admin' ? 'Admin' : 'Atendente'}</span></td>
+            <td>
+                <div class="row-actions">
+                    <button class="act-btn edit" onclick="openEdit('${esc(u.id)}','${esc(u.name)}')">✏️ Editar</button>
+                    ${u.id !== 'admin'
+                    ? `<button class="act-btn del" onclick="deleteAtt('${esc(u.id)}','${esc(u.name)}')">🗑 Excluir</button>`
+                    : `<span style="font-size:.75rem;color:var(--muted)">conta protegida</span>`
+                }
+                </div>
+            </td>
+        </tr>`).join('');
+        }
+
+        document.getElementById('add-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const msg = document.getElementById('add-msg');
+            msg.textContent = '';
+            const payload = {
+                username: document.getElementById('new-user').value.trim(),
+                password: document.getElementById('new-pass').value,
+                name: document.getElementById('new-name').value.trim()
+            };
+            const r = await fetch('/api/attendants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const d = await r.json();
+            if (d.success) { e.target.reset(); loadAttendants(); }
+            else { msg.textContent = d.message || 'Erro ao cadastrar'; }
+        };
+
+        async function deleteAtt(id, name) {
+            if (!confirm(`Excluir atendente "${name}"? Esta ação não pode ser desfeita.`)) return;
+            const r = await fetch(`/api/attendants/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            const d = await r.json();
+            if (d.success) loadAttendants();
+            else alert(d.message || 'Erro ao excluir');
+        }
+
+        // ── Edit modal ───────────────────────────────────────────────────────────────
+        function openEdit(id, name) {
+            document.getElementById('edit-id').value = id;
+            document.getElementById('edit-name').value = name;
+            document.getElementById('edit-pass').value = '';
+            document.getElementById('edit-msg').textContent = '';
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+        function closeEditModal() {
+            document.getElementById('edit-modal').classList.add('hidden');
+        }
+
+        document.getElementById('edit-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('edit-id').value;
+            const name = document.getElementById('edit-name').value.trim();
+            const pass = document.getElementById('edit-pass').value;
+            const msg = document.getElementById('edit-msg');
+            msg.textContent = '';
+
+            const body = { name };
+            if (pass) body.password = pass;
+
+            const r = await fetch(`/api/attendants/${encodeURIComponent(id)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const d = await r.json();
+            if (d.success) { closeEditModal(); loadAttendants(); }
+            else { msg.textContent = d.message || 'Erro ao salvar'; }
+        };
+
+        // Close modal on backdrop click
+        document.getElementById('edit-modal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('edit-modal')) closeEditModal();
+        });
+
+        // ── Helpers ──────────────────────────────────────────────────────────────────
+        function esc(str) {
+            return String(str).replace(/[&<>"']/g, c =>
+                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // ── Admin: File Auto-Reply Rules ─────────────────────────────────────────────
+        let fileRules = [];
+
+        // Keep label/hint in sync with selected radio
+        document.querySelectorAll('input[name="fr-type"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                const isExt = radio.value === 'file_extension';
+                document.getElementById('fr-trigger-label').textContent = isExt ? 'Extensão (sem ponto)' : 'Palavra no nome do arquivo';
+                document.getElementById('fr-trigger-hint').textContent = isExt ? 'Exemplos: docx · xlsx · png' : 'Exemplos: boleto · fatura · nota';
+                document.getElementById('fr-trigger').placeholder = isExt ? 'ex: docx' : 'ex: boleto';
+            });
+        });
+
+        async function loadFileRules() {
+            try {
+                fileRules = await (await fetch('/api/file-rules')).json();
+                renderFileRules();
+            } catch (_) { }
+        }
+
+        function renderFileRules() {
+            const wrap = document.getElementById('fr-list');
+            if (!fileRules.length) {
+                wrap.innerHTML = `<p style="color:var(--muted);font-size:.83rem;text-align:center;padding:16px 0">Nenhuma regra configurada ainda.</p>`;
+                return;
+            }
+            wrap.innerHTML = `
+                <table style="width:100%;border-collapse:collapse;font-size:.85rem">
+                    <thead>
+                        <tr>
+                            <th style="color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-bottom:1px solid var(--border);text-align:left">Tipo</th>
+                            <th style="color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-bottom:1px solid var(--border);text-align:left">Valor</th>
+                            <th style="color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-bottom:1px solid var(--border);text-align:left">Mensagem ao cliente</th>
+                            <th style="color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-bottom:1px solid var(--border);text-align:left">Ativo</th>
+                            <th style="color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-bottom:1px solid var(--border)"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${fileRules.map(r => `
+                        <tr>
+                            <td style="padding:10px;border-bottom:1px solid rgba(48,54,61,.5)">
+                                <span class="badge-role ${r.type === 'file_extension' ? 'badge-ext' : 'badge-kw'}" style="display:inline-block;padding:2px 8px;border-radius:99px;font-size:.72rem;font-weight:600">
+                                    ${r.type === 'file_extension' ? '📄 Extensão' : '🔤 Nome'}
+                                </span>
+                            </td>
+                            <td style="padding:10px;border-bottom:1px solid rgba(48,54,61,.5)"><code style="background:rgba(255,255,255,.06);padding:2px 7px;border-radius:5px;font-size:.82rem">${esc(r.trigger)}</code></td>
+                            <td style="padding:10px;border-bottom:1px solid rgba(48,54,61,.5)"><span class="rule-msg" title="${esc(r.message)}">${esc(r.message)}</span></td>
+                            <td style="padding:10px;border-bottom:1px solid rgba(48,54,61,.5)">
+                                <label class="toggle">
+                                    <input type="checkbox" ${r.is_active ? 'checked' : ''} onchange="toggleFileRule(${r.id}, this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </td>
+                            <td style="padding:10px;border-bottom:1px solid rgba(48,54,61,.5)">
+                                <button class="act-btn del" onclick="deleteFileRule(${r.id})">🗑 Excluir</button>
+                            </td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>`;
+        }
+
+        document.getElementById('file-rule-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const msg = document.getElementById('fr-msg');
+            msg.textContent = '';
+            const type = document.querySelector('input[name="fr-type"]:checked').value;
+            const trigger = document.getElementById('fr-trigger').value.trim();
+            const message = document.getElementById('fr-message').value.trim();
+            if (!trigger || !message) { msg.textContent = 'Preencha o valor e a mensagem.'; return; }
+            const r = await fetch('/api/file-rules', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type, trigger, message })
+            });
+            const d = await r.json();
+            if (d.success) {
+                document.getElementById('fr-trigger').value = '';
+                document.getElementById('fr-message').value = '';
+                loadFileRules();
+            } else { msg.textContent = d.message || 'Erro ao salvar.'; }
+        };
+
+        async function toggleFileRule(id, isActive) {
+            await fetch(`/api/file-rules/${id}/toggle`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_active: isActive })
+            });
+            // Reflect locally without full reload
+            const rule = fileRules.find(r => r.id === id);
+            if (rule) rule.is_active = isActive ? 1 : 0;
+        }
+
+        async function deleteFileRule(id) {
+            if (!confirm('Excluir esta regra?')) return;
+            await fetch(`/api/file-rules/${id}`, { method: 'DELETE' });
+            loadFileRules();
+        }
+
+        // ── Admin: Canned Responses (Respostas Rápidas) ────────────────────────────────────────
+        let cannedAdminList = [];
+
+        async function loadCannedAdmin() {
+            try {
+                cannedAdminList = await (await fetch('/api/canned-responses')).json();
+                renderCannedAdmin();
+            } catch (_) { }
+        }
+
+        function renderCannedAdmin() {
+            const wrap = document.getElementById('canned-admin-list');
+            if (!cannedAdminList.length) {
+                wrap.innerHTML = `<p style="color:var(--muted);font-size:.83rem;text-align:center;padding:16px 0">Nenhuma resposta rápida cadastrada ainda.<br><small>Os atendentes usam o atalho "/" no chat para inserí-las.</small></p>`;
+                return;
+            }
+            wrap.innerHTML = `
+                <table style="width:100%;border-collapse:collapse;font-size:.85rem">
+                    <thead>
+                        <tr>
+                            <th style="color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-bottom:1px solid var(--border);text-align:left">Título / Atalho</th>
+                            <th style="color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-bottom:1px solid var(--border);text-align:left">Texto</th>
+                            <th style="color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-bottom:1px solid var(--border)"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${cannedAdminList.map(r => `
+                        <tr>
+                            <td style="padding:10px;border-bottom:1px solid rgba(48,54,61,.5);vertical-align:top">
+                                <code style="background:rgba(255,255,255,.06);padding:2px 8px;border-radius:5px;font-size:.82rem">/${esc(r.title)}</code>
+                            </td>
+                            <td style="padding:10px;border-bottom:1px solid rgba(48,54,61,.5);color:var(--muted);font-size:.82rem;max-width:320px">${esc(r.content)}</td>
+                            <td style="padding:10px;border-bottom:1px solid rgba(48,54,61,.5)">
+                                <button class="act-btn del" onclick="deleteCannedAdmin(${r.id})">🗑 Excluir</button>
+                            </td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>`;
+        }
+
+        document.getElementById('canned-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const msg = document.getElementById('canned-msg');
+            msg.textContent = '';
+            const title = document.getElementById('canned-title').value.trim();
+            const content = document.getElementById('canned-content').value.trim();
+            if (!title || !content) { msg.textContent = 'Preencha o título e o texto.'; return; }
+            const r = await fetch('/api/canned-responses', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, content })
+            });
+            const d = await r.json();
+            if (d.success) {
+                document.getElementById('canned-title').value = '';
+                document.getElementById('canned-content').value = '';
+                loadCannedAdmin();
+            } else { msg.textContent = d.message || 'Erro ao salvar.'; }
+        };
+
+        async function deleteCannedAdmin(id) {
+            if (!confirm('Excluir esta resposta rápida?')) return;
+            await fetch(`/api/canned-responses/${id}`, { method: 'DELETE' });
+            loadCannedAdmin();
+        }
+
+        // ── DB Maintenance ───────────────────────────────────────────────────
+        async function loadDbStats() {
+            const days = document.getElementById('db-purge-chat-days').value || 30;
+            const r = await fetch(`/api/db-stats?days=${days}`, { headers: buildAdminHeaders() });
+            if (!r.ok) { document.getElementById('db-stats-box').innerHTML = '<span style="color:var(--danger)">Sem permissão ou erro ao carregar.</span>'; return; }
+            const d = await r.json();
+            document.getElementById('db-stats-box').innerHTML = `
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
+                    <div class="stat-mini"><div class="stat-mini-val">${d.file_size_mb ?? '–'} MB</div><div class="stat-mini-lbl">Tamanho do arquivo</div></div>
+                    <div class="stat-mini"><div class="stat-mini-val">${(d.media_mb ?? 0).toFixed(1)} MB</div><div class="stat-mini-lbl">Blobs de mídia (base64)</div></div>
+                    <div class="stat-mini"><div class="stat-mini-val">${d.messages_with_media ?? 0}</div><div class="stat-mini-lbl">Msgs com mídia salva</div></div>
+                    <div class="stat-mini"><div class="stat-mini-val">${d.total_messages ?? 0}</div><div class="stat-mini-lbl">Total de mensagens</div></div>
+                    <div class="stat-mini"><div class="stat-mini-val">${d.purgeable_chats ?? 0}</div><div class="stat-mini-lbl">Chats finalizados puergáveis</div></div>
+                </div>`;
+        }
+
+        async function runPurgeMedia() {
+            const days = parseInt(document.getElementById('db-purge-media-days').value) || 7;
+            if (!confirm(`Apagar dados binários de mídias com mais de ${days} dias?\nO texto e metadados das mensagens serão mantidos.`)) return;
+            const btn = document.getElementById('btn-purge-media');
+            btn.disabled = true; btn.textContent = 'Processando…';
+            const r = await fetch('/api/db-purge-media', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem('wa_admin_token')}` },
+                body: JSON.stringify({ days })
+            });
+            const d = await r.json();
+            btn.disabled = false; btn.textContent = '🗑 Limpar Mídias';
+            document.getElementById('db-action-msg').innerHTML = d.success
+                ? `<span style="color:var(--accent)">✔ ${d.affected} blobs removidos (msgs > ${days} dias). Execute o VACUUM para liberar espaço em disco.</span>`
+                : `<span style="color:var(--danger)">Erro: ${d.message}</span>`;
+            loadDbStats();
+        }
+
+        async function runPurgeChats() {
+            const days = parseInt(document.getElementById('db-purge-chat-days').value) || 30;
+            if (!confirm(`⚠️ Isso apagará PERMANENTEMENTE todos os chats finalizados com mais de ${days} dias, incluindo todas as mensagens.\n\nEsta ação não pode ser desfeita. Confirmar?`)) return;
+            const btn = document.getElementById('btn-purge-chats');
+            btn.disabled = true; btn.textContent = 'Processando…';
+            const r = await fetch('/api/db-purge-chats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem('wa_admin_token')}` },
+                body: JSON.stringify({ days })
+            });
+            const d = await r.json();
+            btn.disabled = false; btn.textContent = '💣 Apagar Chats Antigos';
+            document.getElementById('db-action-msg').innerHTML = d.success
+                ? `<span style="color:var(--accent)">✔ ${d.affected} chats removidos (> ${days} dias). Execute o VACUUM para liberar espaço em disco.</span>`
+                : `<span style="color:var(--danger)">Erro: ${d.message}</span>`;
+            loadDbStats();
+        }
+
+        async function runVacuum() {
+            if (!confirm('Executar VACUUM? O banco ficará bloqueado por alguns segundos.')) return;
+            const btn = document.getElementById('btn-vacuum');
+            btn.disabled = true; btn.textContent = 'Compactando…';
+            const r = await fetch('/api/db-vacuum', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${sessionStorage.getItem('wa_admin_token')}` }
+            });
+            const d = await r.json();
+            btn.disabled = false; btn.textContent = '⚡ VACUUM (Compactar)';
+            document.getElementById('db-action-msg').innerHTML = d.success
+                ? `<span style="color:var(--accent)">✔ VACUUM concluído em ${d.elapsed_sec}s. O arquivo encolheu.</span>`
+                : `<span style="color:var(--danger)">Erro: ${d.message}</span>`;
+            loadDbStats();
+        }
+    </script>
+
+</body>
+
+</html>
