@@ -49,3 +49,6 @@ Thumbs.db
 
 # Pasta do Agente (Opcional, mas geralmente GEMINI.md vai junto)
 # .agent/ 
+
+# Projetos Anexos / Subpastas Ignoradas
+chatwoot-develop/
