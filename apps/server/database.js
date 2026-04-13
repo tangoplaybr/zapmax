@@ -884,10 +884,12 @@ class Database {
 
             this.db.all(
                 `SELECT m.id, m.chat_id, m.body, m.from_me, m.sender_name,
-                        m.media_type, m.media_filename, m.media_data, m.media_pages,
+                        m.media_type, m.media_filename, m.media_pages,
                         m.media_size, m.timestamp, m.ack, m.is_deleted, m.is_edited,
-                        m.quoted_body, m.quoted_status_media, m.quoted_status_type,
+                        m.quoted_body, m.quoted_status_type,
                         m.quoted_msg_id, m.msg_serialized,
+                        CASE WHEN m.media_data IS NOT NULL AND m.media_data != '' THEN 1 ELSE 0 END AS has_media_data,
+                        CASE WHEN m.quoted_status_media IS NOT NULL AND m.quoted_status_media != '' THEN 1 ELSE 0 END AS has_quoted_status_media,
                         'message' AS record_type,
                         GROUP_CONCAT(r.emoji || ':' || r.sender_type || ':' || COALESCE(r.sender_name,''), '|') AS reactions_raw
                  FROM messages m
@@ -1100,6 +1102,28 @@ class Database {
         });
     }
 
+    /**
+     * Fetch raw media_data or quoted_status_media for a single message (on-demand).
+     * Used by GET /api/media/:msgId to serve binary content via HTTP.
+     * @param {string} msgId
+     * @param {'media'|'quoted_status'} type - which blob to fetch
+     * @returns {Promise<{data: string, mediaType: string}|null>}
+     */
+    getMediaData(msgId, type = 'media') {
+        const col = type === 'quoted_status' ? 'quoted_status_media' : 'media_data';
+        const typeCol = type === 'quoted_status' ? 'quoted_status_type' : 'media_type';
+        return new Promise((resolve) => {
+            this.db.get(
+                `SELECT ${col} AS data, ${typeCol} AS media_type FROM messages WHERE id = ?`,
+                [msgId],
+                (err, row) => {
+                    if (err || !row || !row.data) return resolve(null);
+                    resolve({ data: row.data, mediaType: row.media_type });
+                }
+            );
+        });
+    }
+
     // Feature F — update ACK status in real time
     updateMessageAck(messageId, ack) {
         return new Promise((resolve, reject) => {
@@ -1113,7 +1137,14 @@ class Database {
         return new Promise((resolve, reject) => {
             // Fetch messages with reactions
             this.db.all(
-                `SELECT m.*, 'message' as record_type,
+                `SELECT m.id, m.chat_id, m.body, m.from_me, m.sender_name,
+                        m.media_type, m.media_filename, m.media_pages,
+                        m.media_size, m.timestamp, m.ack, m.is_deleted, m.is_edited,
+                        m.quoted_body, m.quoted_status_type,
+                        m.quoted_msg_id, m.msg_serialized,
+                        CASE WHEN m.media_data IS NOT NULL AND m.media_data != '' THEN 1 ELSE 0 END AS has_media_data,
+                        CASE WHEN m.quoted_status_media IS NOT NULL AND m.quoted_status_media != '' THEN 1 ELSE 0 END AS has_quoted_status_media,
+                        'message' as record_type,
                         GROUP_CONCAT(r.emoji || ':' || r.sender_type || ':' || COALESCE(r.sender_name,''), '|') as reactions_raw
                  FROM messages m
                  LEFT JOIN reactions r ON r.message_id = m.id

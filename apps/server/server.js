@@ -1502,6 +1502,35 @@ app.get('/api/wa-status', (req, res) => {
     res.json({ ...whatsapp.getStatus(), lastQR: lastQR || null });
 });
 
+// ── Media On-Demand API (lazy-loading) ───────────────────────────────────────
+// Serves media_data or quoted_status_media as binary HTTP responses with caching.
+// Browser uses <img src="/api/media/MSG_ID"> instead of inline data: URIs.
+app.get('/api/media/:msgId', async (req, res) => {
+    try {
+        const type = req.query.type === 'quoted_status' ? 'quoted_status' : 'media';
+        const result = await db.getMediaData(req.params.msgId, type);
+        if (!result || !result.data) return res.status(404).end();
+
+        // data is stored as "data:<mime>;base64,<payload>" — split it
+        const match = result.data.match(/^data:([^;]+);base64,(.+)$/);
+        if (!match) return res.status(404).end();
+
+        const mimeType = match[1];
+        const buffer = Buffer.from(match[2], 'base64');
+
+        res.set({
+            'Content-Type': mimeType,
+            'Content-Length': buffer.length,
+            'Cache-Control': 'public, max-age=31536000, immutable',
+            'X-Content-Type-Options': 'nosniff',
+        });
+        res.send(buffer);
+    } catch (err) {
+        console.error('[API] /api/media error:', err.message);
+        res.status(500).end();
+    }
+});
+
 // Force reconnect (useful when auto-reconnect stalls)
 app.post('/api/wa-reconnect', authMiddleware, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Acesso negado' });
@@ -1646,7 +1675,7 @@ whatsapp.on('queue_refresh', async () => {
 
 whatsapp.on('message', async (data) => {
     debouncedBroadcastQueue();
-    io.emit('new_whatsapp_message', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl, body: data.body, msgId: data.msgId || null, msgSerialized: data.msgSerialized || null, mediaData: data.mediaData || null, mediaType: data.mediaType || null, mediaFilename: data.mediaFilename || null, mediaPages: data.mediaPages || null, mediaSize: data.mediaSize || null, quotedStatusMedia: data.quotedStatusMedia || null, quoted_body: data.quotedBody || null, quoted_msg_id: data.quotedMsgId || null, timestamp: normalizeToIsoUtc(data.timestamp) });
+    io.emit('new_whatsapp_message', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl, body: data.body, msgId: data.msgId || null, msgSerialized: data.msgSerialized || null, mediaType: data.mediaType || null, mediaFilename: data.mediaFilename || null, mediaPages: data.mediaPages || null, mediaSize: data.mediaSize || null, has_media_data: !!(data.mediaData), has_quoted_status_media: !!(data.quotedStatusMedia), quoted_body: data.quotedBody || null, quoted_msg_id: data.quotedMsgId || null, timestamp: normalizeToIsoUtc(data.timestamp) });
     // Notify clients to refresh contacts panel when a new message arrives (new contact may have been upserted)
     io.emit('new_contact', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl });
     // NOTE: We intentionally do NOT push chat_history here.
@@ -1704,7 +1733,7 @@ whatsapp.on('outgoing_message', async (data) => {
             return;
         }
     }
-    io.emit('new_outgoing_message', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl, body: data.body, mediaData: data.mediaData || null, mediaType: data.mediaType || null, mediaFilename: data.mediaFilename || null, mediaPages: data.mediaPages || null, mediaSize: data.mediaSize || null, timestamp: normalizeToIsoUtc(data.timestamp) });
+    io.emit('new_outgoing_message', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl, body: data.body, msgId: data.msgId || null, mediaType: data.mediaType || null, mediaFilename: data.mediaFilename || null, mediaPages: data.mediaPages || null, mediaSize: data.mediaSize || null, has_media_data: !!(data.mediaData), timestamp: normalizeToIsoUtc(data.timestamp) });
 });
 
 // ACK updates (delivered, read) — push tick updates to viewing clients

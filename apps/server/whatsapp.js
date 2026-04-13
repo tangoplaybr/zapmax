@@ -915,7 +915,7 @@ class WhatsAppGateway extends EventEmitter {
             await db.updateChat(chatId, name, bodyText, avatarUrl, undefined, number, true);
             await db.saveMessage(outMsgId, chatId, bodyText, true, quotedBody, null, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, 1, null, null, null, null, msg.timestamp);
 
-            this.emit('outgoing_message', { chatId, name, avatarUrl, body: bodyText, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, timestamp: msg.timestamp });
+            this.emit('outgoing_message', { chatId, name, avatarUrl, body: bodyText, msgId: outMsgId, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, timestamp: msg.timestamp });
         });
 
         // ── Feature F: message_ack (delivery/read status) ─────────

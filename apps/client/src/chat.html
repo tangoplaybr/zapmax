@@ -1210,21 +1210,20 @@
                     from_me: 0,
                     quoted_body: data.quoted_body || null,
                     quoted_msg_id: data.quoted_msg_id || null,
-                    mediaData: data.mediaData,
                     mediaType: data.mediaType,
                     mediaFilename: data.mediaFilename,
                     mediaPages: data.mediaPages,
                     mediaSize: data.mediaSize,
-                    quotedStatusMedia: data.quotedStatusMedia || null,
+                    has_media_data: data.has_media_data || false,
+                    has_quoted_status_media: data.has_quoted_status_media || false,
                     msgSerialized: data.msgSerialized || null,
                     timestamp: data.timestamp || new Date().toISOString(),
                     sender_name: data.name,
                     reactions: {}
                 });
-                // Schedule a debounced DB sync only for media messages — waits for all files in the burst to
+                // Schedule a debounced DB sync for media messages — waits for all files in the burst to
                 // be saved before fetching history, then deduplicates with appendMessage guard.
-                // Text messages DON'T need this — the live_ append is sufficient.
-                if (data.mediaData || data.mediaType) {
+                if (data.has_media_data || data.mediaType) {
                     debouncedGetHistory(data.chatId, 400);
                 }
             } else {
@@ -1240,7 +1239,7 @@
             // Fix B: skip append if we just sent media (media_sent will re-render history)
             if (pendingMediaUpload) return;
             if (data.chatId === currentChatId)
-                appendMessage({ id: 'live_ext_' + Date.now(), body: data.body, from_me: 1, external: true, mediaData: data.mediaData, mediaType: data.mediaType, mediaFilename: data.mediaFilename, timestamp: data.timestamp || new Date().toISOString(), reactions: {} });
+                appendMessage({ id: data.msgId || ('live_ext_' + Date.now()), body: data.body, from_me: 1, external: true, has_media_data: data.has_media_data || false, mediaType: data.mediaType, mediaFilename: data.mediaFilename, timestamp: data.timestamp || new Date().toISOString(), reactions: {} });
         });
 
         // Feature F — real-time tick update
@@ -2129,10 +2128,23 @@
         // Audio data cache — keeps raw base64 data URIs out of the DOM (avoids HTML truncation)
         const _audioDataCache = new Map();
 
+        // Build the HTTP URL for on-demand media loading (replaces inline base64)
+        function mediaUrl(msgId, type) {
+            const base = `${SERVER_URL}/api/media/${encodeURIComponent(msgId)}`;
+            return type === 'quoted_status' ? base + '?type=quoted_status' : base;
+        }
+
         function buildMediaHtml(msg) {
-            const md = msg.media_data || msg.mediaData || null, mt = msg.media_type || msg.mediaType || null;
-            const mf = msg.media_filename || msg.mediaFilename || null, mp = msg.media_pages || msg.mediaPages || null, ms = msg.media_size || msg.mediaSize || null;
-            if (!mt && !md) {
+            const mt = msg.media_type || msg.mediaType || null;
+            const mf = msg.media_filename || msg.mediaFilename || null;
+            const mp = msg.media_pages || msg.mediaPages || null;
+            const ms = msg.media_size || msg.mediaSize || null;
+            // Resolve media source: HTTP URL (preferred) or legacy inline base64
+            const hasMedia = msg.has_media_data || msg.media_data || msg.mediaData;
+            const md = (msg.media_data || msg.mediaData) // legacy inline base64
+                     || (hasMedia && msg.id ? mediaUrl(msg.id) : null); // HTTP lazy URL
+
+            if (!mt && !hasMedia) {
                 // Check if this is a media message where download failed (body = [image], [video], etc.)
                 const bodyHint = (msg.body || '').trim();
                 const mediaMatch = bodyHint.match(/^\[(image|video|audio|sticker|document|ptt|arquivo|mídia)\]$/i);
@@ -2154,13 +2166,13 @@
                 const sizeStr = ms ? (ms >= 1024 ? `${(ms / 1024).toFixed(1)} MB` : `${ms} KB`) : '';
                 const pagesStr = mp ? `${mp} página${mp > 1 ? 's' : ''}` : '';
                 const meta = [pagesStr, sizeStr].filter(Boolean).join(' · ');
-                // Store dl data in data attributes — avoids esc() corrupting filenames in onclick strings
-                const dlData = md ? `data-dl-uri="${esc(md)}" data-dl-name="${fname}"` : '';
-                const dlBtn = md
+                const dlSrc = md || '';
+                const dlData = dlSrc ? `data-dl-uri="${esc(dlSrc)}" data-dl-name="${fname}"` : '';
+                const dlBtn = dlSrc
                     ? `<button class="pdf-dl" ${dlData} onclick="downloadFile(this.dataset.dlUri, this.dataset.dlName)">⬇ Baixar</button>`
                     : `<span style="font-size:10px;color:var(--text-3)">Não disponível</span>`;
-                const msgIdAttr = msg.id ? `data-sel-id="${esc(String(msg.id))}" data-sel-url="${esc(md)}" data-sel-name="${fname}"` : '';
-                const ctrlClick = msg.id && md ? `onclick="if(event.ctrlKey){event.preventDefault();toggleMediaSelect('${esc(String(msg.id))}','${esc(md)}','${fname}',this)}"` : '';
+                const msgIdAttr = msg.id ? `data-sel-id="${esc(String(msg.id))}" data-sel-url="${esc(dlSrc)}" data-sel-name="${fname}"` : '';
+                const ctrlClick = msg.id && dlSrc ? `onclick="if(event.ctrlKey){event.preventDefault();toggleMediaSelect('${esc(String(msg.id))}','${esc(dlSrc)}','${fname}',this)}"` : '';
                 return `<div class="pdf-card" ${msgIdAttr} ${ctrlClick} oncontextmenu="handleMediaContextMenu(event, this)"><div class="pdf-icon">PDF</div><div class="pdf-info"><div class="pdf-name" title="${fname}">${fname}</div>${meta ? `<div class="pdf-meta">${meta}</div>` : ''}</div>${dlBtn}</div>`;
             }
 
@@ -2172,26 +2184,26 @@
                 }
                 return '';
             }
-            if (mt?.startsWith('image/webp')) return `<img src="${md}" class="sticker-thumb" alt="figurinha">`;
+            if (mt?.startsWith('image/webp')) return `<img src="${md}" class="sticker-thumb" alt="figurinha" loading="lazy">`;
             if (mt?.startsWith('image/')) {
                 const ext = mt.split('/')[1] || 'jpg';
                 const msgIdAttr = msg.id ? `data-sel-id="${esc(String(msg.id))}" data-sel-url="${md}" data-sel-name="imagem.${ext}"` : '';
                 const ctrlClick = msg.id && md ? `onclick="if(event.ctrlKey){event.stopPropagation();toggleMediaSelect('${esc(String(msg.id))}','${md}','imagem.${ext}',this)}"` : '';
                 return `<div class="img-media-wrap" ${msgIdAttr} ${ctrlClick} oncontextmenu="handleMediaContextMenu(event, this)">
-                    <img src="${md}" class="media-thumb" alt="imagem" onclick="this.requestFullscreen&&this.requestFullscreen()">
+                    <img src="${md}" class="media-thumb" alt="imagem" loading="lazy" onclick="this.requestFullscreen&&this.requestFullscreen()">
                     <button class="pdf-dl" style="margin-top:4px" onclick="downloadFile('${md}','imagem.${ext}')">⬇ Baixar imagem</button>
                 </div>`;
             }
-            if (mt?.startsWith('video/')) return `<video src="${md}" class="media-thumb" controls></video>`;
+            if (mt?.startsWith('video/')) return `<video src="${md}" class="media-thumb" controls preload="metadata"></video>`;
             if (mt?.startsWith('audio/')) {
                 const audioId = 'audio_' + (msg.id || Date.now());
-                // Store media data in JS Map — never embed base64 in HTML attributes
+                // Store media URL in JS Map for transcription
                 if (md) _audioDataCache.set(audioId, md);
                 const transcribeBtn = md
                     ? `<button class="pdf-dl" id="trbtn_${audioId}" style="margin-top:6px;font-size:.78rem" onclick="transcribeAudio('${audioId}')" title="Transcrever com IA">🗒️ Transcrever</button>`
                     : '';
                 return `<div style="display:flex;flex-direction:column;gap:2px">
-                    <audio id="${audioId}" src="${md}" controls style="max-width:220px;margin-top:4px"></audio>
+                    <audio id="${audioId}" src="${md}" controls preload="metadata" style="max-width:220px;margin-top:4px"></audio>
                     ${transcribeBtn}
                     <div id="tx_${audioId}" style="display:none;margin-top:6px;font-size:.82rem;color:var(--text-1);background:var(--surface2);border-radius:8px;padding:8px 10px;max-width:260px;white-space:pre-wrap;line-height:1.5"></div>
                 </div>`;
@@ -2351,8 +2363,9 @@
               <div class="msg-action-group"><button class="msg-act" title="Mais" onclick="toggleMsgMoreMenu(this, event)">⋮</button>${moreMenuHtml}</div>
             </div>`;
             // Feature D — quoted status preview
-            const statusPreviewHtml = (msg.quoted_status_media)
-                ? `<div class="status-preview"><img src="${msg.quoted_status_media}" alt="Status"><span class="status-preview-label">👁 Respondeu ao seu status</span></div>`
+            const qsMedia = msg.quoted_status_media || (msg.has_quoted_status_media && msg.id ? mediaUrl(msg.id, 'quoted_status') : null);
+            const statusPreviewHtml = qsMedia
+                ? `<div class="status-preview"><img src="${qsMedia}" alt="Status" loading="lazy"><span class="status-preview-label">👁 Respondeu ao seu status</span></div>`
                 : '';
             const quotedHtml = msg.quoted_body
                 ? `<div class="quoted-block" data-quoted-id="${esc(String(msg.quoted_msg_id || ''))}" data-quoted-body="${esc(msg.quoted_body)}" onclick="event.stopPropagation();scrollToQuoted(this)" style="cursor:pointer" title="Ir para mensagem original">↩ ${esc(msg.quoted_body)}</div>`
