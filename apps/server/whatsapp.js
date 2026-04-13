@@ -398,7 +398,14 @@ class WhatsAppGateway extends EventEmitter {
             authStrategy: new LocalAuth({ dataPath: resolveSessionPath() }),
             puppeteer: {
                 ...(chromePath ? { executablePath: chromePath } : {}),
-                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+                args: [
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox', 
+                    '--disable-dev-shm-usage',
+                    '--disable-background-timer-throttling',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding'
+                ],
                 headless: true,
             }
         });
@@ -513,7 +520,10 @@ class WhatsAppGateway extends EventEmitter {
         this._healthCheckTimer = setInterval(async () => {
             if (!isCurrent() || !this.isReady) { this._healthCheckFailCount = 0; return; }
             try {
-                const state = await this.client.getState();
+                const state = await Promise.race([
+                    this.client.getState(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000))
+                ]);
                 if (state !== 'CONNECTED') {
                     this._healthCheckFailCount++;
                     if (this._healthCheckFailCount >= 2) {
@@ -724,7 +734,7 @@ class WhatsAppGateway extends EventEmitter {
                 const msgId = msg.id?.id || msg.id?._serialized || `in_${Date.now()}`;
                 const msgSerialized = msg.id?._serialized || null;
                 const bodyText = msg.body || (mediaFilename ? `[${msg.type || 'arquivo'}]` : (msg.hasMedia ? `[${msg.type || 'mídia'}]` : ''));
-                await db.saveMessage(msgId, chatId, bodyText, 0, quotedBody, null, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, 1, quotedStatusMedia, null, quotedMsgId, msgSerialized).catch(() => { });
+                await db.saveMessage(msgId, chatId, bodyText, 0, quotedBody, null, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, 1, quotedStatusMedia, null, quotedMsgId, msgSerialized, msg.timestamp).catch(() => { });
 
                 // Emit to server.js → frontend
                 this.emit('message', {
@@ -903,9 +913,9 @@ class WhatsAppGateway extends EventEmitter {
             // ── Chatwoot find_message_by_source_id dedup guard ──────
             if (await db.messageExists(outMsgId)) { console.log('OUTGOING (skipped dedup by DB)', outMsgId); return; }
             await db.updateChat(chatId, name, bodyText, avatarUrl, undefined, number, true);
-            await db.saveMessage(outMsgId, chatId, bodyText, true, quotedBody, null, mediaData, mediaType, mediaFilename, mediaPages, mediaSize);
+            await db.saveMessage(outMsgId, chatId, bodyText, true, quotedBody, null, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, 1, null, null, null, null, msg.timestamp);
 
-            this.emit('outgoing_message', { chatId, name, avatarUrl, body: bodyText, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, timestamp: new Date() });
+            this.emit('outgoing_message', { chatId, name, avatarUrl, body: bodyText, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, timestamp: msg.timestamp });
         });
 
         // ── Feature F: message_ack (delivery/read status) ─────────

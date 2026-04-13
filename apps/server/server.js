@@ -9,6 +9,57 @@ const whatsapp = require('./whatsapp');
 const jwt = require('jsonwebtoken');
 const Groq = require('groq-sdk');
 const { toFile } = require('groq-sdk');
+const APP_TIMEZONE = 'America/Sao_Paulo';
+
+function normalizeToIsoUtc(ts) {
+    if (!ts && ts !== 0) return new Date().toISOString();
+    if (ts instanceof Date) return ts.toISOString();
+    let date;
+    if (typeof ts === 'number') {
+        date = new Date(ts < 1e12 ? ts * 1000 : ts);
+    } else {
+        const raw = String(ts).trim();
+        if (/^\d+$/.test(raw)) {
+            const n = Number(raw);
+            date = new Date(n < 1e12 ? n * 1000 : n);
+        } else if (raw.includes('Z') || /[+-]\d{2}:\d{2}$/.test(raw)) {
+            date = new Date(raw);
+        } else {
+            date = new Date(raw.replace(' ', 'T') + 'Z');
+        }
+    }
+    return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
+function getNowInAppTimezone() {
+    return new Date(new Date().toLocaleString('en-US', { timeZone: APP_TIMEZONE }));
+}
+
+function getAppDateKey(date = new Date()) {
+    return new Intl.DateTimeFormat('sv-SE', {
+        timeZone: APP_TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(date);
+}
+
+function getAppHour(date = new Date()) {
+    return Number(new Intl.DateTimeFormat('en-US', {
+        timeZone: APP_TIMEZONE,
+        hour: '2-digit',
+        hour12: false
+    }).format(date));
+}
+
+function getAppMinuteKey(date = new Date()) {
+    return new Intl.DateTimeFormat('pt-BR', {
+        timeZone: APP_TIMEZONE,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    }).format(date);
+}
 
 // Resolves the avatars/ directory in both dev and Electron contexts
 function resolveAvatarsDir() {
@@ -1072,7 +1123,7 @@ io.on('connection', (socket) => {
     });
 
     // ── Send message (to WhatsApp) ────────────────────────────────
-    socket.on('send_message', async ({ chatId, body, quotedBody, quotedMsgId }) => {
+    socket.on('send_message', async ({ chatId, body, quotedBody, quotedMsgId, quotedMsgSerialized }) => {
         console.log('[SEND_DEBUG] Received send_message:', chatId, body?.slice(0, 50));
         const prefixedBody = `*${socket.user.name} | ${COMPANY_NAME}:* ${body}`;
         let waMsg = null;
@@ -1089,17 +1140,41 @@ io.on('connection', (socket) => {
                 if (serviceCode) socket.emit('service_code_assigned', { chatId, serviceCode });
             }
             let sendOptions = {};
-            // Try to quote the real WA message if quotedMsgId is provided
-            if (quotedMsgId) {
+            const quoteRequested = !!(quotedMsgId || quotedMsgSerialized);
+            if (quotedMsgSerialized) {
+                sendOptions.quotedMessageId = quotedMsgSerialized;
+            }
+            // Legacy fallback: try to quote by msgId lookup when serialized ID is unavailable
+            if (!sendOptions.quotedMessageId && quotedMsgId) {
                 try {
                     const chat = await whatsapp.client.getChatById(chatId);
                     const msgs = await chat.fetchMessages({ limit: 50 });
                     const targetMsg = msgs.find(m => m.id.id === quotedMsgId || m.id._serialized === quotedMsgId);
                     if (targetMsg) sendOptions.quotedMessageId = targetMsg.id._serialized;
-                } catch (_) { /* quote failed silently, send without it */ }
+                } catch (_) { /* fallback failed — warning sent below */ }
+            }
+            if (quoteRequested && !sendOptions.quotedMessageId) {
+                socket.emit('message_warning', {
+                    chatId,
+                    warning: 'Nao foi possivel localizar a mensagem original para citacao no WhatsApp. A mensagem sera enviada sem citacao real.'
+                });
             }
             console.log('[SEND_DEBUG] Calling whatsapp.sendMessage, isReady:', whatsapp.isReady);
-            waMsg = await whatsapp.sendMessage(chatId, prefixedBody, sendOptions);
+            try {
+                waMsg = await whatsapp.sendMessage(chatId, prefixedBody, sendOptions);
+            } catch (sendErr) {
+                const hadQuotedIntent = quoteRequested && !!sendOptions.quotedMessageId;
+                if (hadQuotedIntent) {
+                    console.warn('[SEND_DEBUG] Quote send failed, retrying without quote:', sendErr.message);
+                    socket.emit('message_warning', {
+                        chatId,
+                        warning: 'Nao foi possivel aplicar a citacao real no WhatsApp. A mensagem foi enviada sem citacao.'
+                    });
+                    waMsg = await whatsapp.sendMessage(chatId, prefixedBody, {});
+                } else {
+                    throw sendErr;
+                }
+            }
             console.log('[SEND_DEBUG] sendMessage OK, msgId:', waMsg?.id?.id);
         } catch (err) {
             console.error('[SEND_DEBUG] ERROR in send_message try block:', err.message, err.stack);
@@ -1171,25 +1246,51 @@ io.on('connection', (socket) => {
         })();
     });
 
-    // ── Edit message — DB first, instant UI, then async WA sync ────────────
-    socket.on('edit_message', async ({ chatId, msgId, newBody }) => {
-        // 1. Update DB immediately
-        await db.editMessage(msgId, newBody, chatId);
+    // ── Edit message — WA first, then DB/UI (avoids false "edited" state) ───
+    socket.on('edit_message', async ({ chatId, msgId, msgSerialized, newBody }) => {
+        try {
+            let waMsg = null;
 
-        // 2. Push targeted edit event — no full history needed
-        Array.from(onlineAttendants.values()).forEach(s => {
-            if (viewingChat.get(s.user.id) === chatId) s.emit('message_updated', { chatId, msgId, newBody });
-        });
+            // 1) Prefer serialized WA ID when available (most reliable)
+            if (msgSerialized) {
+                try { waMsg = await whatsapp.client.getMessageById(msgSerialized); } catch (_) { }
+            }
 
-        // 3. Fire-and-forget: sync with WhatsApp in the background
-        (async () => {
-            try {
+            // 2) Fallback: lookup by recent messages in this chat
+            if (!waMsg) {
                 const waChat = await whatsapp.client.getChatById(chatId);
-                const waMessages = await waChat.fetchMessages({ limit: 50 });
-                const waMsg = waMessages.find(m => m.id.id === msgId || m.id._serialized === msgId);
-                if (waMsg) await waMsg.edit(newBody).catch(() => { });
-            } catch (_) { /* best-effort */ }
-        })();
+                const waMessages = await waChat.fetchMessages({ limit: 100 });
+                waMsg = waMessages.find(m =>
+                    m.id.id === msgId ||
+                    m.id._serialized === msgId ||
+                    (msgSerialized && m.id._serialized === msgSerialized)
+                );
+            }
+
+            if (!waMsg) {
+                socket.emit('message_edit_error', {
+                    chatId,
+                    msgId,
+                    error: 'Mensagem original nao encontrada no WhatsApp para edicao.'
+                });
+                return;
+            }
+
+            // 3) Apply real edit in WhatsApp first
+            await waMsg.edit(newBody);
+
+            // 4) Persist and broadcast only after real success
+            await db.editMessage(msgId, newBody, chatId);
+            Array.from(onlineAttendants.values()).forEach(s => {
+                if (viewingChat.get(s.user.id) === chatId) s.emit('message_updated', { chatId, msgId, newBody });
+            });
+        } catch (err) {
+            socket.emit('message_edit_error', {
+                chatId,
+                msgId,
+                error: err?.message || 'Falha ao editar mensagem no WhatsApp.'
+            });
+        }
     });
 
     // ── Retry media download ───────────────────────────────────────────
@@ -1326,18 +1427,33 @@ app.patch('/api/contacts/:id/name', authMiddleware, async (req, res) => {
 
 // ── Client Notes REST endpoints ──────────────────────────────────────────────
 app.get('/api/client-notes/:contactId', authMiddleware, async (req, res) => {
-    const notes = await db.getClientNotes(req.params.contactId);
-    res.json(notes);
+    try {
+        const rawContactId = decodeURIComponent(req.params.contactId);
+        const contactId = await db.resolveActiveChatId(rawContactId, null);
+        const notes = await db.getClientNotes(contactId);
+        res.json(notes);
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
 });
 app.post('/api/client-notes', authMiddleware, async (req, res) => {
-    const { contactId, body } = req.body;
-    if (!contactId || !body) return res.status(400).json({ success: false });
-    const result = await db.saveClientNote(contactId, body, req.user.id, req.user.name);
-    res.json({ success: true, id: result.id });
+    try {
+        const { contactId, body } = req.body;
+        if (!contactId || !body) return res.status(400).json({ success: false });
+        const normalizedContactId = await db.resolveActiveChatId(contactId, null);
+        const result = await db.saveClientNote(normalizedContactId, body, req.user.id, req.user.name);
+        res.json({ success: true, id: result.id });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
 });
 app.delete('/api/client-notes/:id', authMiddleware, async (req, res) => {
-    await db.deleteClientNote(req.params.id);
-    res.json({ success: true });
+    try {
+        await db.deleteClientNote(req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
 });
 
 app.get('/api/auto-replies', authMiddleware, async (req, res) => {
@@ -1530,7 +1646,7 @@ whatsapp.on('queue_refresh', async () => {
 
 whatsapp.on('message', async (data) => {
     debouncedBroadcastQueue();
-    io.emit('new_whatsapp_message', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl, body: data.body, msgId: data.msgId || null, msgSerialized: data.msgSerialized || null, mediaData: data.mediaData || null, mediaType: data.mediaType || null, mediaFilename: data.mediaFilename || null, mediaPages: data.mediaPages || null, mediaSize: data.mediaSize || null, quotedStatusMedia: data.quotedStatusMedia || null, quoted_body: data.quotedBody || null, quoted_msg_id: data.quotedMsgId || null, timestamp: data.timestamp });
+    io.emit('new_whatsapp_message', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl, body: data.body, msgId: data.msgId || null, msgSerialized: data.msgSerialized || null, mediaData: data.mediaData || null, mediaType: data.mediaType || null, mediaFilename: data.mediaFilename || null, mediaPages: data.mediaPages || null, mediaSize: data.mediaSize || null, quotedStatusMedia: data.quotedStatusMedia || null, quoted_body: data.quotedBody || null, quoted_msg_id: data.quotedMsgId || null, timestamp: normalizeToIsoUtc(data.timestamp) });
     // Notify clients to refresh contacts panel when a new message arrives (new contact may have been upserted)
     io.emit('new_contact', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl });
     // NOTE: We intentionally do NOT push chat_history here.
@@ -1588,7 +1704,7 @@ whatsapp.on('outgoing_message', async (data) => {
             return;
         }
     }
-    io.emit('new_outgoing_message', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl, body: data.body, mediaData: data.mediaData || null, mediaType: data.mediaType || null, mediaFilename: data.mediaFilename || null, mediaPages: data.mediaPages || null, mediaSize: data.mediaSize || null, timestamp: data.timestamp });
+    io.emit('new_outgoing_message', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl, body: data.body, mediaData: data.mediaData || null, mediaType: data.mediaType || null, mediaFilename: data.mediaFilename || null, mediaPages: data.mediaPages || null, mediaSize: data.mediaSize || null, timestamp: normalizeToIsoUtc(data.timestamp) });
 });
 
 // ACK updates (delivered, read) — push tick updates to viewing clients
@@ -1746,7 +1862,7 @@ async function runDelayAlertWatchdog() {
         const hourEnd = parseInt(await db.getConfig('delay_alert_hour_end') || '18', 10);
 
         // Business hours check — use local server time (Brasília = UTC-3)
-        const nowLocal = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+        const nowLocal = getNowInAppTimezone();
         const currentHour = nowLocal.getHours();
         if (currentHour < hourStart || currentHour >= hourEnd) {
             console.log(`[DelayAlert] Fora do horário comercial (${currentHour}h, janela: ${hourStart}h-${hourEnd}h). Pulando.`);
@@ -1806,7 +1922,7 @@ async function runDelayAlertWatchdog() {
                 // Build alert message
                 const clientName = chat.name && chat.name !== chat.id ? chat.name : chat.id.replace(/@.*$/, '');
                 const minutesWaiting = Math.round(minutesSinceClient);
-                const lastMsgTime = lastClientMsg.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                const lastMsgTime = lastClientMsg.toLocaleTimeString('pt-BR', { timeZone: APP_TIMEZONE, hour: '2-digit', minute: '2-digit' });
 
                 let statusLine;
                 let attendantLine = '';
@@ -1889,12 +2005,11 @@ setInterval(async () => {
 
         const hour = parseInt(await db.getConfig('auto_purge_hour') || '3', 10);
         const now = new Date();
-        // Use local date parts (consistent with getHours() which is also local)
-        const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        const todayStr = getAppDateKey(now);
 
-        if (now.getHours() === hour && _lastAutoPurgeDate !== todayStr) {
+        if (getAppHour(now) === hour && _lastAutoPurgeDate !== todayStr) {
             _lastAutoPurgeDate = todayStr;
-            console.log(`[AutoPurge] Triggered at ${now.toLocaleTimeString('pt-BR')} (local time)`);
+            console.log(`[AutoPurge] Triggered at ${now.toLocaleTimeString('pt-BR', { timeZone: APP_TIMEZONE })} (${APP_TIMEZONE})`);
             runAutoPurge();
         }
     } catch (_) { }
@@ -1907,8 +2022,8 @@ console.log('[AutoPurge] Scheduler registered (checks every 60s)');
 let _lastNoteActivateMinute = '';
 setInterval(async () => {
     try {
-        const now = new Date();
-        const currentMinute = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const now = getNowInAppTimezone();
+        const currentMinute = getAppMinuteKey(now);
         if (currentMinute === _lastNoteActivateMinute) return; // already checked this minute
         _lastNoteActivateMinute = currentMinute;
         const today = now.getDay();

@@ -824,7 +824,23 @@
                 socket.emit('get_history', { chatId: currentChatId });
             }
         });
-        socket.on('connect', () => { hideConnBanner(); loadCannedResponses(); });
+        socket.on('connect', () => { 
+            hideConnBanner(); 
+            loadCannedResponses(); 
+            
+            // Sync currently open chat to retrieve missed messages during sleep
+            if (currentChatId) {
+                debouncedGetHistory(currentChatId, 50);
+            }
+        });
+
+        // Trigger history refresh if user tabs out and tabs back in after a long sleep 
+        window.addEventListener('focus', () => {
+            if (socket.connected && currentChatId) {
+                debouncedGetHistory(currentChatId, 50);
+            }
+        });
+
 
         // ── Debounced get_history — used after multi-file burst to sync from DB once ──
         // Prevents the race condition where N files arrive simultaneously and N parallel
@@ -838,6 +854,23 @@
                     socket.emit('get_history', { chatId });
                 }
             }, delayMs);
+        }
+        const APP_TIMEZONE = 'America/Sao_Paulo';
+        function parseTimestampToDate(ts) {
+            if (!ts && ts !== 0) return null;
+            if (ts instanceof Date) return ts;
+            if (typeof ts === 'number') return new Date(ts < 1e12 ? ts * 1000 : ts);
+            const s = String(ts).trim();
+            if (!s) return null;
+            if (/^\d+$/.test(s)) {
+                const n = Number(s);
+                return new Date(n < 1e12 ? n * 1000 : n);
+            }
+            if (s.includes('Z') || /[+-]\d{2}:\d{2}$/.test(s)) return new Date(s);
+            return new Date(s.replace(' ', 'T') + 'Z');
+        }
+        function formatBrDateTime(date, options) {
+            return date.toLocaleString('pt-BR', { timeZone: APP_TIMEZONE, ...options });
         }
 
         // When any attendant closes a chat, recipients/viewers see the finished overlay
@@ -875,7 +908,7 @@
         _dbgEl.style.cssText = 'display:none;position:fixed;top:60px;right:10px;background:rgba(0,0,0,.9);color:#0f0;font:11px monospace;padding:8px 12px;z-index:99999;border-radius:6px;pointer-events:none;max-width:400px;white-space:pre-wrap';
         document.body.appendChild(_dbgEl);
         function _dbgAdd(tag) {
-            const t = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const t = formatBrDateTime(new Date(), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             _dbg.log.push(`${t} ${tag}`);
             if (_dbg.log.length > 8) _dbg.log.shift();
         }
@@ -1184,7 +1217,7 @@
                     mediaSize: data.mediaSize,
                     quotedStatusMedia: data.quotedStatusMedia || null,
                     msgSerialized: data.msgSerialized || null,
-                    timestamp: new Date().toISOString(),
+                    timestamp: data.timestamp || new Date().toISOString(),
                     sender_name: data.name,
                     reactions: {}
                 });
@@ -1207,7 +1240,7 @@
             // Fix B: skip append if we just sent media (media_sent will re-render history)
             if (pendingMediaUpload) return;
             if (data.chatId === currentChatId)
-                appendMessage({ id: 'live_ext_' + Date.now(), body: data.body, from_me: 1, external: true, mediaData: data.mediaData, mediaType: data.mediaType, mediaFilename: data.mediaFilename, timestamp: new Date().toISOString(), reactions: {} });
+                appendMessage({ id: 'live_ext_' + Date.now(), body: data.body, from_me: 1, external: true, mediaData: data.mediaData, mediaType: data.mediaType, mediaFilename: data.mediaFilename, timestamp: data.timestamp || new Date().toISOString(), reactions: {} });
         });
 
         // Feature F — real-time tick update
@@ -1227,6 +1260,14 @@
                     lastMsg.remove();
                 }
             }
+        });
+        socket.on('message_edit_error', ({ chatId, error }) => {
+            if (chatId && chatId !== currentChatId) return;
+            showToast('❌ Falha ao editar', error || 'Nao foi possivel editar a mensagem no WhatsApp.', true);
+        });
+        socket.on('message_warning', ({ chatId, warning }) => {
+            if (chatId && chatId !== currentChatId) return;
+            showToast('⚠️ Aviso', warning || 'Mensagem enviada sem citação real no WhatsApp.');
         });
         // Auto-refresh contacts panel when server signals a new contact was upserted
         socket.on('new_contact', () => {
@@ -1557,11 +1598,11 @@
                 });
                 // Waiting: oldest first (longest time in queue at top)
                 if (currentFilter === 'waiting' || currentFilter === 'special') {
-                    filtered.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                    filtered.sort((a, b) => parseTimestampToDate(a.timestamp) - parseTimestampToDate(b.timestamp));
                 }
                 // Attending: most recent message first (newest at top)
                 if (currentFilter === 'active') {
-                    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    filtered.sort((a, b) => parseTimestampToDate(b.timestamp) - parseTimestampToDate(a.timestamp));
                 }
             }
             const list = document.getElementById('conv-list');
@@ -1569,9 +1610,9 @@
             list.innerHTML = filtered.map(c => {
                 const init = (c.name || c.id)[0].toUpperCase();
                 const unread = unreadMap[c.id] || 0;
-                const cDate = c.timestamp ? new Date((c.timestamp.includes('T') || c.timestamp.endsWith('Z') ? c.timestamp : c.timestamp.replace(' ', 'T') + 'Z')) : null;
-                const cIsToday = cDate && cDate.toDateString() === new Date().toDateString();
-                const time = cDate ? (cIsToday ? cDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : cDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })) : '';
+                const cDate = parseTimestampToDate(c.timestamp);
+                const cIsToday = cDate && formatBrDateTime(cDate, { day: '2-digit', month: '2-digit', year: 'numeric' }) === formatBrDateTime(new Date(), { day: '2-digit', month: '2-digit', year: 'numeric' });
+                const time = cDate ? (cIsToday ? formatBrDateTime(cDate, { hour: '2-digit', minute: '2-digit' }) : formatBrDateTime(cDate, { day: '2-digit', month: '2-digit' })) : '';
                 // Phone: DB column first (durable), then derived from @c.us ID
                 // @lid IDs are internal WA identifiers — don't display them as phone numbers
                 const rawPhone = c.phone || (c.id && c.id.endsWith('@c.us') ? c.id.replace('@c.us', '') : '');
@@ -1745,8 +1786,8 @@
             inp.focus();
         }
 
-        function setReplyTo(msgId, msgBody) {
-            replyToMsg = { id: msgId, body: msgBody };
+        function setReplyTo(msgId, msgBody, msgSerialized = null) {
+            replyToMsg = { id: msgId, body: msgBody, serialized: msgSerialized || null };
             document.getElementById('reply-preview-text').textContent = '↩ ' + msgBody;
             document.getElementById('reply-preview').classList.add('show');
             document.getElementById('message-input').focus();
@@ -1996,7 +2037,8 @@
                 socket.emit('send_message', {
                     chatId: currentChatId, body: text,
                     quotedBody: replyToMsg ? replyToMsg.body : null,
-                    quotedMsgId: replyToMsg ? replyToMsg.id : null
+                    quotedMsgId: replyToMsg ? replyToMsg.id : null,
+                    quotedMsgSerialized: replyToMsg ? (replyToMsg.serialized || null) : null
                 });
             }
             clearReplyTo(); stopTyping();
@@ -2264,32 +2306,23 @@
             }
             if (msg.id && area.querySelector(`[data-msg-id="${CSS.escape(String(msg.id))}"]`)) return;
             const fromMe = msg.from_me, isNote = fromMe === 2, isOut = fromMe === 1 || isNote, isExt = !!msg.external;
-            // Parse timestamp: SQLite stores UTC without 'Z', append it to prevent local-time misinterpretation
-            function parseTS(ts) {
-                if (!ts) return null;
-                if (ts instanceof Date) return ts;
-                const s = String(ts);
-                // Already ISO with Z or +offset — parse as-is
-                if (s.includes('Z') || s.includes('+')) return new Date(s);
-                // SQLite CURRENT_TIMESTAMP format: 'YYYY-MM-DD HH:MM:SS' → treat as UTC
-                return new Date(s.replace(' ', 'T') + 'Z');
-            }
-            const msgDate = msg.timestamp ? parseTS(msg.timestamp) : null;
+            const msgDate = msg.timestamp ? parseTimestampToDate(msg.timestamp) : null;
             // G.2: show dd/mm HH:mm for past days; HH:mm for today
-            const isToday2 = msgDate ? msgDate.toDateString() === new Date().toDateString() : true;
-            const fullDate = msgDate ? msgDate.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+            const isToday2 = msgDate ? formatBrDateTime(msgDate, { day: '2-digit', month: '2-digit', year: 'numeric' }) === formatBrDateTime(new Date(), { day: '2-digit', month: '2-digit', year: 'numeric' }) : true;
+            const fullDate = msgDate ? formatBrDateTime(msgDate, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
             const displayTime = msgDate
                 ? (isToday2
-                    ? msgDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-                    : msgDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' + msgDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))
+                    ? formatBrDateTime(msgDate, { hour: '2-digit', minute: '2-digit' })
+                    : `${formatBrDateTime(msgDate, { day: '2-digit', month: '2-digit' })} ${formatBrDateTime(msgDate, { hour: '2-digit', minute: '2-digit' })}`)
                 : '';
             if (msgDate) {
-                const dk = msgDate.toDateString();
+                const dk = formatBrDateTime(msgDate, { day: '2-digit', month: '2-digit', year: 'numeric' });
                 if (dk !== lastRenderedDate) {
                     lastRenderedDate = dk;
                     const now = new Date();
                     const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-                    const label = isToday2 ? 'Hoje' : dk === yesterday.toDateString() ? 'Ontem' : msgDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    const yesterdayKey = formatBrDateTime(yesterday, { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    const label = isToday2 ? 'Hoje' : dk === yesterdayKey ? 'Ontem' : formatBrDateTime(msgDate, { day: '2-digit', month: '2-digit', year: 'numeric' });
                     const divDate = document.createElement('div'); divDate.className = 'date-divider'; divDate.innerHTML = `<span>${label}</span>`; area.appendChild(divDate);
                 }
             }
@@ -2457,7 +2490,7 @@
 
             switch (action) {
                 case 'reply':
-                    setReplyTo(msgId, msgBody);
+                    setReplyTo(msgId, msgBody, row.dataset.msgSerialized || null);
                     closeMsgMenu();
                     break;
                 case 'edit':
@@ -2482,6 +2515,7 @@
 
 
         let _editingMsgId = null; // raw message ID currently being edited
+        let _editingMsgSerialized = null; // whatsapp serialized ID for real edit
 
         function deleteMsg(msgId) {
             if (!currentChatId) return;
@@ -2497,6 +2531,7 @@
             const bubble = row.querySelector('.bubble');
             if (!bubble) return;
             _editingMsgId = msgId;
+            _editingMsgSerialized = row.dataset.msgSerialized || null;
 
             // Read the current body from the DOM to avoid escaping issues with onclick attributes
             const textEl = bubble.querySelector('.msg-text');
@@ -2563,29 +2598,21 @@
             const newBody = ta.value.trim();
             if (!newBody) return;
             const editedMsgId = _editingMsgId;
-            socket.emit('edit_message', { chatId: currentChatId, msgId: editedMsgId, newBody });
-            // Optimistic UI update — show changes immediately
-            const row = document.querySelector(`[data-msg-id="${CSS.escape(editedMsgId)}"]`);
-            if (row) {
-                const bodyEl = row.querySelector('.msg-text');
-                if (bodyEl) {
-                    bodyEl.textContent = newBody;
-                    if (!row.querySelector('.msg-edited-mark')) {
-                        const mark = document.createElement('span');
-                        mark.className = 'msg-edited-mark';
-                        mark.style.cssText = 'font-size:.7rem;color:var(--text-3);margin-left:4px';
-                        mark.textContent = '(editado)';
-                        bodyEl.after(mark);
-                    }
-                }
-            }
+            socket.emit('edit_message', {
+                chatId: currentChatId,
+                msgId: editedMsgId,
+                msgSerialized: _editingMsgSerialized,
+                newBody
+            });
             _editingMsgId = null;
+            _editingMsgSerialized = null;
             const ov = document.getElementById('msg-edit-overlay');
             if (ov) ov.remove();
         }
 
         function cancelEdit() {
             _editingMsgId = null;
+            _editingMsgSerialized = null;
             const ov = document.getElementById('msg-edit-overlay');
             if (ov) ov.remove();
         }
@@ -2659,6 +2686,7 @@
                 const res = await fetch(`http://${h}:${p}/api/client-notes/${encodeURIComponent(currentChatId)}`, {
                     headers: { 'Authorization': `Bearer ${tkn}` }
                 });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const notes = await res.json();
                 const list = document.getElementById('notes-list');
                 const btn = document.getElementById('notes-toggle-btn');
@@ -2683,7 +2711,10 @@
                         </div>
                     </div>`;
                 }).join('');
-            } catch (e) { console.warn('[Notes] Load error:', e.message); }
+            } catch (e) {
+                console.warn('[Notes] Load error:', e.message);
+                showToast('Erro', 'Nao foi possivel carregar as notas do cliente.', true);
+            }
         }
 
         async function saveClientNote() {
@@ -2694,14 +2725,16 @@
             const sIp = localStorage.getItem('wa_server');
             const [h, p] = sIp.includes(':') ? sIp.split(':') : [sIp, '3001'];
             try {
-                await fetch(`http://${h}:${p}/api/client-notes`, {
+                const res = await fetch(`http://${h}:${p}/api/client-notes`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${tkn}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify({ contactId: currentChatId, body })
                 });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 inp.value = '';
                 await loadClientNotes();
-            } catch (e) { showToast('Erro', 'Não foi possível salvar a nota.', true); }
+                showToast('Sucesso', 'Nota salva com sucesso.');
+            } catch (e) { showToast('Erro', 'Nao foi possivel salvar a nota.', true); }
         }
 
         async function deleteClientNote(id) {
@@ -2710,12 +2743,14 @@
             const sIp = localStorage.getItem('wa_server');
             const [h, p] = sIp.includes(':') ? sIp.split(':') : [sIp, '3001'];
             try {
-                await fetch(`http://${h}:${p}/api/client-notes/${id}`, {
+                const res = await fetch(`http://${h}:${p}/api/client-notes/${id}`, {
                     method: 'DELETE',
                     headers: { 'Authorization': `Bearer ${tkn}` }
                 });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 await loadClientNotes();
-            } catch (e) { showToast('Erro', 'Não foi possível excluir.', true); }
+                showToast('Sucesso', 'Nota excluida.');
+            } catch (e) { showToast('Erro', 'Nao foi possivel excluir.', true); }
         }
 
         // ── Panel switcher ──────────────────────────────────────────────────
@@ -2953,9 +2988,9 @@
                     ? `<img src="${resolveAvatar(c.avatar_url)}" alt="" onerror="this.parentNode.textContent='${initial}'" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
                     : initial;
                 // Timestamp formatting
-                const cDate = c.timestamp ? new Date((c.timestamp.includes('T') || c.timestamp.endsWith('Z') ? c.timestamp : c.timestamp.replace(' ', 'T') + 'Z')) : null;
-                const cIsToday = cDate && cDate.toDateString() === new Date().toDateString();
-                const time = cDate ? (cIsToday ? cDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : cDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })) : '';
+                const cDate = parseTimestampToDate(c.timestamp);
+                const cIsToday = cDate && formatBrDateTime(cDate, { day: '2-digit', month: '2-digit', year: 'numeric' }) === formatBrDateTime(new Date(), { day: '2-digit', month: '2-digit', year: 'numeric' });
+                const time = cDate ? (cIsToday ? formatBrDateTime(cDate, { hour: '2-digit', minute: '2-digit' }) : formatBrDateTime(cDate, { day: '2-digit', month: '2-digit' })) : '';
                 // Status pill
                 let statusHtml = '';
                 if (c.status === 'attending') {
@@ -3134,6 +3169,7 @@
                 const res = await fetch(`http://${h}:${p}/api/client-notes/${encodeURIComponent(contactId)}`, {
                     headers: { 'Authorization': `Bearer ${tkn}` }
                 });
+                if (!res.ok) return;
                 const notes = await res.json();
                 const btn = document.getElementById('notes-toggle-btn');
                 if (!btn) return;

@@ -1000,13 +1000,19 @@ class Database {
         });
     }
 
-    saveMessage(messageId, chatId, body, fromMe, quotedBody = null, senderName = null, mediaData = null, mediaType = null, mediaFilename = null, mediaPages = null, mediaSize = null, ack = 1, quotedStatusMedia = null, quotedStatusType = null, quotedMsgId = null, msgSerialized = null) {
+    saveMessage(messageId, chatId, body, fromMe, quotedBody = null, senderName = null, mediaData = null, mediaType = null, mediaFilename = null, mediaPages = null, mediaSize = null, ack = 1, quotedStatusMedia = null, quotedStatusType = null, quotedMsgId = null, msgSerialized = null, timestamp = null) {
         return new Promise((resolve, reject) => {
             const fromMeVal = (fromMe === true || fromMe === 1) ? 1 : fromMe === 2 ? 2 : 0;
+            const tsStr = timestamp ? new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp).toISOString().replace('T', ' ').slice(0, 19) : null;
+            
+            const cols = `id, chat_id, body, from_me, quoted_body, sender_name, media_data, media_type, media_filename, media_pages, media_size, ack, quoted_status_media, quoted_status_type, quoted_msg_id, msg_serialized` + (tsStr ? `, timestamp` : ``);
+            const vals = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?` + (tsStr ? `, ?` : ``);
+            const params = [messageId, chatId, body, fromMeVal, quotedBody, senderName, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, ack, quotedStatusMedia, quotedStatusType, quotedMsgId, msgSerialized];
+            if (tsStr) params.push(tsStr);
+
             this.db.run(
-                `INSERT OR IGNORE INTO messages (id, chat_id, body, from_me, quoted_body, sender_name, media_data, media_type, media_filename, media_pages, media_size, ack, quoted_status_media, quoted_status_type, quoted_msg_id, msg_serialized)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [messageId, chatId, body, fromMeVal, quotedBody, senderName, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, ack, quotedStatusMedia, quotedStatusType, quotedMsgId, msgSerialized],
+                `INSERT OR IGNORE INTO messages (${cols}) VALUES (${vals})`,
+                params,
                 (err) => { if (err) reject(err); else resolve(); }
             );
         });
