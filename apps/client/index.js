@@ -56,9 +56,14 @@ ipcMain.handle('save-file', async (_event, { filename, dataUri, contactName }) =
         const targetDir = path.join(os.homedir(), 'Downloads', safeContact);
         fs.mkdirSync(targetDir, { recursive: true });
 
-        // Handle data URIs (data:mime;base64,xxx) and plain base64
+        // Handle data URIs (data:mime;base64,xxx), HTTP fetch, and plain base64
         let buffer;
-        if (dataUri.startsWith('data:')) {
+        if (dataUri.startsWith('http://') || dataUri.startsWith('https://')) {
+            const res = await fetch(dataUri);
+            if (!res.ok) throw new Error('Falha HTTP ao baixar arquivo: ' + res.status);
+            const arrayBuffer = await res.arrayBuffer();
+            buffer = Buffer.from(arrayBuffer);
+        } else if (dataUri.startsWith('data:')) {
             const base64 = dataUri.split(',')[1];
             buffer = Buffer.from(base64, 'base64');
         } else {

@@ -158,7 +158,7 @@
         function sendMessage() {
             const body = input.value.trim();
             if (body && currentChatId) {
-                socket.emit('send_message', { chatId: currentChatId, body });
+                socket.emit('send_message', { chatId: currentChatId, body, clientSentAt: Date.now() });
                 input.value = '';
             }
         }

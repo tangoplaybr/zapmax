@@ -9,6 +9,77 @@ const whatsapp = require('./whatsapp');
 const jwt = require('jsonwebtoken');
 const Groq = require('groq-sdk');
 const { toFile } = require('groq-sdk');
+const APP_TIMEZONE = 'America/Sao_Paulo';
+
+function normalizeToIsoUtc(ts) {
+    if (!ts && ts !== 0) return new Date().toISOString();
+    if (ts instanceof Date) return ts.toISOString();
+    let date;
+    if (typeof ts === 'number') {
+        date = new Date(ts < 1e12 ? ts * 1000 : ts);
+    } else {
+        const raw = String(ts).trim();
+        if (/^\d+$/.test(raw)) {
+            const n = Number(raw);
+            date = new Date(n < 1e12 ? n * 1000 : n);
+        } else if (raw.includes('Z') || /[+-]\d{2}:\d{2}$/.test(raw)) {
+            date = new Date(raw);
+        } else {
+            date = new Date(raw.replace(' ', 'T') + 'Z');
+        }
+    }
+    return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
+function getNowInAppTimezone() {
+    return new Date(new Date().toLocaleString('en-US', { timeZone: APP_TIMEZONE }));
+}
+
+/**
+ * Epoch em segundos gravado na DB quando o atendente responde pelo painel.
+ * Força o instante do navegador (clientSentAt) — hora do PC do atendente — para timestamp/sent_at_utc;
+ * só usa o servidor se o cliente não enviar ou o valor for inválido.
+ */
+function resolvePanelAttendantEpochSeconds(clientSentAt) {
+    const serverSec = Math.floor(Date.now() / 1000);
+    if (clientSentAt == null || clientSentAt === undefined) return serverSec;
+    let ms = Number(clientSentAt);
+    if (!Number.isFinite(ms)) return serverSec;
+    if (ms > 0 && ms < 1e12) ms *= 1000;
+    const minMs = Date.UTC(2018, 0, 1);
+    const maxMs = Date.UTC(2038, 11, 31);
+    if (ms < minMs || ms > maxMs) {
+        console.warn('[send_message] clientSentAt fora do intervalo seguro; usando relógio do servidor');
+        return serverSec;
+    }
+    return Math.floor(ms / 1000);
+}
+
+function getAppDateKey(date = new Date()) {
+    return new Intl.DateTimeFormat('sv-SE', {
+        timeZone: APP_TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(date);
+}
+
+function getAppHour(date = new Date()) {
+    return Number(new Intl.DateTimeFormat('en-US', {
+        timeZone: APP_TIMEZONE,
+        hour: '2-digit',
+        hour12: false
+    }).format(date));
+}
+
+function getAppMinuteKey(date = new Date()) {
+    return new Intl.DateTimeFormat('pt-BR', {
+        timeZone: APP_TIMEZONE,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    }).format(date);
+}
 
 // Resolves the avatars/ directory in both dev and Electron contexts
 function resolveAvatarsDir() {
@@ -341,21 +412,36 @@ app.post('/api/transcribe', authMiddleware, async (req, res) => {
         const groqKey = await db.getConfig('groq_api_key');
         if (!groqKey) return res.status(503).json({ success: false, message: 'Chave Groq não configurada. Configure em Painel Admin → Integração IA.' });
 
-        const { audioData } = req.body;
-        if (!audioData) return res.status(400).json({ success: false, message: 'audioData obrigatório' });
+        const { audioData, msgId } = req.body;
+        if (!audioData && !msgId) return res.status(400).json({ success: false, message: 'Dados de áudio ou msgId obrigatório' });
 
-        // Strip data URI prefix — handles any number of params (e.g. codecs=opus)
-        // data:audio/ogg;codecs=opus;base64,AAAA... → everything before and including the comma is removed
-        const base64 = audioData.replace(/^data:[^,]+,/, '');
+        let base64;
+        let mime = 'audio/ogg';
+
+        // Fix audio missing: Either get base64 from audioData if present, or query it from DB via msgId
+        if (msgId) {
+            const row = await db.getMediaData(msgId, 'media');
+            if (row && row.data) {
+                base64 = row.data.replace(/^data:[^,]+,/, '');
+                const mimeMatch = row.data.match(/^data:([^;,]+)/);
+                if (mimeMatch) mime = mimeMatch[1].trim();
+                else mime = row.mediaType || 'audio/ogg';
+            } else if (!audioData) {
+                return res.status(404).json({ success: false, message: 'Áudio não encontrado no banco de dados.' });
+            }
+        }
+
+        if (!base64 && audioData) {
+            base64 = audioData.replace(/^data:[^,]+,/, '');
+            const mimeMatch = audioData.match(/^data:([^;,]+)/);
+            if (mimeMatch) mime = mimeMatch[1].trim();
+        }
+
         if (!base64 || base64.length < 100) {
             return res.status(400).json({ success: false, message: 'Dados de áudio inválidos ou vazios.' });
         }
         const audioBuffer = Buffer.from(base64, 'base64');
 
-        // Extract MIME from data URI — first segment between "data:" and ";"
-        // data:audio/ogg;codecs=opus;base64,... → "audio/ogg"
-        const mimeMatch = audioData.match(/^data:([^;,]+)/);
-        const mime = mimeMatch ? mimeMatch[1].trim() : 'audio/ogg';
         const extMap = { webm: 'webm', mp4: 'mp4', wav: 'wav', mpeg: 'mp3', mp3: 'mp3', m4a: 'm4a', opus: 'ogg', flac: 'flac', ogg: 'ogg' };
         const extKey = Object.keys(extMap).find(k => mime.includes(k));
         const ext = extKey ? extMap[extKey] : 'ogg';
@@ -722,9 +808,11 @@ app.post('/api/start-chat', async (req, res) => {
         const prefixed = `*${attendantName || 'Atendente'} | ${company}:* ${message}`;
         const msg = await whatsapp.sendMessage(contactId, prefixed); // uses _sentIds to prevent message_create duplicate
         const msgId = (msg && msg.id && msg.id.id) ? msg.id.id : `start_${Date.now()}`;
+        const startOutgoingTs = Math.floor(Date.now() / 1000);
         // fromMe=true: esta é uma mensagem de saída — não deve resetar o status do chat
         await db.updateChat(contactId, null, message, null, 'waiting', null, true);
-        await db.saveMessage(msgId, contactId, message, 1, null, attendantName || 'Atendente');
+        await db.saveMessage(msgId, contactId, message, 1, null, attendantName || 'Atendente',
+            null, null, null, null, null, 1, null, null, null, null, startOutgoingTs, true);
         // Atribuir o atendente imediatamente para evitar que o chat apareça na fila de 'waiting'
         if (attendantId) {
             const { serviceCode } = await db.assignChat(contactId, attendantId, attendantName || 'Atendente');
@@ -768,9 +856,10 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
         const waMsg = await whatsapp.sendMedia(chatId, base64, mimetype, filename, captionText);
         const msgId = (waMsg && waMsg.id && waMsg.id.id) ? waMsg.id.id : `media_${Date.now()}`;
         const displayBody = captionText || filename;
+        const mediaOutgoingTs = Math.floor(Date.now() / 1000);
         await db.saveMessage(msgId, chatId, displayBody, 1, null, decoded.name,
             `data:${mimetype};base64,${base64}`, mimetype, filename, null,
-            Math.round(req.file.size / 1024));
+            Math.round(req.file.size / 1024), 1, null, null, null, null, mediaOutgoingTs, true);
 
         // Broadcast updated queue & history to all viewing attendants
         await broadcastQueue();
@@ -1072,7 +1161,9 @@ io.on('connection', (socket) => {
     });
 
     // ── Send message (to WhatsApp) ────────────────────────────────
-    socket.on('send_message', async ({ chatId, body, quotedBody, quotedMsgId }) => {
+    socket.on('send_message', async ({ chatId, body, quotedBody, quotedMsgId, quotedMsgSerialized, clientSentAt }) => {
+        // Ancorar já no início: hora “forçada” na DB = relógio do atendente (browser), não o pós-await do WA
+        const outgoingTs = resolvePanelAttendantEpochSeconds(clientSentAt);
         console.log('[SEND_DEBUG] Received send_message:', chatId, body?.slice(0, 50));
         const prefixedBody = `*${socket.user.name} | ${COMPANY_NAME}:* ${body}`;
         let waMsg = null;
@@ -1089,17 +1180,41 @@ io.on('connection', (socket) => {
                 if (serviceCode) socket.emit('service_code_assigned', { chatId, serviceCode });
             }
             let sendOptions = {};
-            // Try to quote the real WA message if quotedMsgId is provided
-            if (quotedMsgId) {
+            const quoteRequested = !!(quotedMsgId || quotedMsgSerialized);
+            if (quotedMsgSerialized) {
+                sendOptions.quotedMessageId = quotedMsgSerialized;
+            }
+            // Legacy fallback: try to quote by msgId lookup when serialized ID is unavailable
+            if (!sendOptions.quotedMessageId && quotedMsgId) {
                 try {
                     const chat = await whatsapp.client.getChatById(chatId);
                     const msgs = await chat.fetchMessages({ limit: 50 });
                     const targetMsg = msgs.find(m => m.id.id === quotedMsgId || m.id._serialized === quotedMsgId);
                     if (targetMsg) sendOptions.quotedMessageId = targetMsg.id._serialized;
-                } catch (_) { /* quote failed silently, send without it */ }
+                } catch (_) { /* fallback failed — warning sent below */ }
+            }
+            if (quoteRequested && !sendOptions.quotedMessageId) {
+                socket.emit('message_warning', {
+                    chatId,
+                    warning: 'Nao foi possivel localizar a mensagem original para citacao no WhatsApp. A mensagem sera enviada sem citacao real.'
+                });
             }
             console.log('[SEND_DEBUG] Calling whatsapp.sendMessage, isReady:', whatsapp.isReady);
-            waMsg = await whatsapp.sendMessage(chatId, prefixedBody, sendOptions);
+            try {
+                waMsg = await whatsapp.sendMessage(chatId, prefixedBody, sendOptions);
+            } catch (sendErr) {
+                const hadQuotedIntent = quoteRequested && !!sendOptions.quotedMessageId;
+                if (hadQuotedIntent) {
+                    console.warn('[SEND_DEBUG] Quote send failed, retrying without quote:', sendErr.message);
+                    socket.emit('message_warning', {
+                        chatId,
+                        warning: 'Nao foi possivel aplicar a citacao real no WhatsApp. A mensagem foi enviada sem citacao.'
+                    });
+                    waMsg = await whatsapp.sendMessage(chatId, prefixedBody, {});
+                } else {
+                    throw sendErr;
+                }
+            }
             console.log('[SEND_DEBUG] sendMessage OK, msgId:', waMsg?.id?.id);
         } catch (err) {
             console.error('[SEND_DEBUG] ERROR in send_message try block:', err.message, err.stack);
@@ -1110,12 +1225,50 @@ io.on('connection', (socket) => {
 
         // Save to DB with retry — protects against transient SQLITE_BUSY from concurrent transactions
         try {
-            await db.saveMessage(msgId, chatId, body, 1, quotedBody || null, socket.user.name, null, null, null, null, null, 1, null, null, quotedMsgId || null);
+            await db.saveMessage(
+                msgId,
+                chatId,
+                body,
+                1,
+                quotedBody || null,
+                socket.user.name,
+                null,
+                null,
+                null,
+                null,
+                null,
+                1,
+                null,
+                null,
+                quotedMsgId || null,
+                null,
+                outgoingTs,
+                true
+            );
         } catch (saveErr) {
             console.warn('[send_message] saveMessage failed, retrying in 500ms:', saveErr.message);
             try {
                 await new Promise(r => setTimeout(r, 500));
-                await db.saveMessage(msgId, chatId, body, 1, quotedBody || null, socket.user.name, null, null, null, null, null, 1, null, null, quotedMsgId || null);
+                await db.saveMessage(
+                    msgId,
+                    chatId,
+                    body,
+                    1,
+                    quotedBody || null,
+                    socket.user.name,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    1,
+                    null,
+                    null,
+                    quotedMsgId || null,
+                    null,
+                    outgoingTs,
+                    true
+                );
             } catch (retryErr) {
                 console.error('[send_message] saveMessage retry failed:', retryErr.message);
             }
@@ -1124,7 +1277,7 @@ io.on('connection', (socket) => {
         // ALWAYS emit live_message — the WA message was already sent successfully
         const liveMsg = {
             id: msgId, chat_id: chatId, body, from_me: 1,
-            sender_name: socket.user.name, timestamp: new Date().toISOString(),
+            sender_name: socket.user.name, timestamp: normalizeToIsoUtc(outgoingTs),
             quoted_body: quotedBody || null, quoted_msg_id: quotedMsgId || null,
             record_type: 'message', reactions: {}
         };
@@ -1171,25 +1324,51 @@ io.on('connection', (socket) => {
         })();
     });
 
-    // ── Edit message — DB first, instant UI, then async WA sync ────────────
-    socket.on('edit_message', async ({ chatId, msgId, newBody }) => {
-        // 1. Update DB immediately
-        await db.editMessage(msgId, newBody, chatId);
+    // ── Edit message — WA first, then DB/UI (avoids false "edited" state) ───
+    socket.on('edit_message', async ({ chatId, msgId, msgSerialized, newBody }) => {
+        try {
+            let waMsg = null;
 
-        // 2. Push targeted edit event — no full history needed
-        Array.from(onlineAttendants.values()).forEach(s => {
-            if (viewingChat.get(s.user.id) === chatId) s.emit('message_updated', { chatId, msgId, newBody });
-        });
+            // 1) Prefer serialized WA ID when available (most reliable)
+            if (msgSerialized) {
+                try { waMsg = await whatsapp.client.getMessageById(msgSerialized); } catch (_) { }
+            }
 
-        // 3. Fire-and-forget: sync with WhatsApp in the background
-        (async () => {
-            try {
+            // 2) Fallback: lookup by recent messages in this chat
+            if (!waMsg) {
                 const waChat = await whatsapp.client.getChatById(chatId);
-                const waMessages = await waChat.fetchMessages({ limit: 50 });
-                const waMsg = waMessages.find(m => m.id.id === msgId || m.id._serialized === msgId);
-                if (waMsg) await waMsg.edit(newBody).catch(() => { });
-            } catch (_) { /* best-effort */ }
-        })();
+                const waMessages = await waChat.fetchMessages({ limit: 100 });
+                waMsg = waMessages.find(m =>
+                    m.id.id === msgId ||
+                    m.id._serialized === msgId ||
+                    (msgSerialized && m.id._serialized === msgSerialized)
+                );
+            }
+
+            if (!waMsg) {
+                socket.emit('message_edit_error', {
+                    chatId,
+                    msgId,
+                    error: 'Mensagem original nao encontrada no WhatsApp para edicao.'
+                });
+                return;
+            }
+
+            // 3) Apply real edit in WhatsApp first
+            await waMsg.edit(newBody);
+
+            // 4) Persist and broadcast only after real success
+            await db.editMessage(msgId, newBody, chatId);
+            Array.from(onlineAttendants.values()).forEach(s => {
+                if (viewingChat.get(s.user.id) === chatId) s.emit('message_updated', { chatId, msgId, newBody });
+            });
+        } catch (err) {
+            socket.emit('message_edit_error', {
+                chatId,
+                msgId,
+                error: err?.message || 'Falha ao editar mensagem no WhatsApp.'
+            });
+        }
     });
 
     // ── Retry media download ───────────────────────────────────────────
@@ -1214,13 +1393,15 @@ io.on('connection', (socket) => {
     });
 
     // ── Send internal note (NOT sent via WhatsApp) ────────────────
-    socket.on('send_note', async ({ chatId, body }) => {
+    socket.on('send_note', async ({ chatId, body, clientSentAt }) => {
+        const noteTs = resolvePanelAttendantEpochSeconds(clientSentAt);
         const noteId = `note_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-        await db.saveMessage(noteId, chatId, body, 2, null, socket.user.name);
+        await db.saveMessage(noteId, chatId, body, 2, null, socket.user.name,
+            null, null, null, null, null, 1, null, null, null, null, noteTs, true);
         // Push only the new note — avoids full history reload
         const liveNote = {
             id: noteId, chat_id: chatId, body, from_me: 2,
-            sender_name: socket.user.name, timestamp: new Date().toISOString(),
+            sender_name: socket.user.name, timestamp: normalizeToIsoUtc(noteTs),
             record_type: 'message', reactions: {}
         };
         Array.from(onlineAttendants.values()).forEach(s => {
@@ -1326,18 +1507,33 @@ app.patch('/api/contacts/:id/name', authMiddleware, async (req, res) => {
 
 // ── Client Notes REST endpoints ──────────────────────────────────────────────
 app.get('/api/client-notes/:contactId', authMiddleware, async (req, res) => {
-    const notes = await db.getClientNotes(req.params.contactId);
-    res.json(notes);
+    try {
+        const rawContactId = decodeURIComponent(req.params.contactId);
+        const contactId = await db.resolveActiveChatId(rawContactId, null);
+        const notes = await db.getClientNotes(contactId);
+        res.json(notes);
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
 });
 app.post('/api/client-notes', authMiddleware, async (req, res) => {
-    const { contactId, body } = req.body;
-    if (!contactId || !body) return res.status(400).json({ success: false });
-    const result = await db.saveClientNote(contactId, body, req.user.id, req.user.name);
-    res.json({ success: true, id: result.id });
+    try {
+        const { contactId, body } = req.body;
+        if (!contactId || !body) return res.status(400).json({ success: false });
+        const normalizedContactId = await db.resolveActiveChatId(contactId, null);
+        const result = await db.saveClientNote(normalizedContactId, body, req.user.id, req.user.name);
+        res.json({ success: true, id: result.id });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
 });
 app.delete('/api/client-notes/:id', authMiddleware, async (req, res) => {
-    await db.deleteClientNote(req.params.id);
-    res.json({ success: true });
+    try {
+        await db.deleteClientNote(req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
 });
 
 app.get('/api/auto-replies', authMiddleware, async (req, res) => {
@@ -1384,6 +1580,35 @@ app.get('/api/lunch-break', authMiddleware, async (req, res) => {
 // ── WhatsApp Status API ──────────────────────────────────────────────────────
 app.get('/api/wa-status', (req, res) => {
     res.json({ ...whatsapp.getStatus(), lastQR: lastQR || null });
+});
+
+// ── Media On-Demand API (lazy-loading) ───────────────────────────────────────
+// Serves media_data or quoted_status_media as binary HTTP responses with caching.
+// Browser uses <img src="/api/media/MSG_ID"> instead of inline data: URIs.
+app.get('/api/media/:msgId', async (req, res) => {
+    try {
+        const type = req.query.type === 'quoted_status' ? 'quoted_status' : 'media';
+        const result = await db.getMediaData(req.params.msgId, type);
+        if (!result || !result.data) return res.status(404).end();
+
+        // data is stored as "data:<mime>;base64,<payload>" — split it
+        const match = result.data.match(/^data:([^;]+);base64,(.+)$/);
+        if (!match) return res.status(404).end();
+
+        const mimeType = match[1];
+        const buffer = Buffer.from(match[2], 'base64');
+
+        res.set({
+            'Content-Type': mimeType,
+            'Content-Length': buffer.length,
+            'Cache-Control': 'public, max-age=31536000, immutable',
+            'X-Content-Type-Options': 'nosniff',
+        });
+        res.send(buffer);
+    } catch (err) {
+        console.error('[API] /api/media error:', err.message);
+        res.status(500).end();
+    }
 });
 
 // Force reconnect (useful when auto-reconnect stalls)
@@ -1530,7 +1755,7 @@ whatsapp.on('queue_refresh', async () => {
 
 whatsapp.on('message', async (data) => {
     debouncedBroadcastQueue();
-    io.emit('new_whatsapp_message', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl, body: data.body, msgId: data.msgId || null, msgSerialized: data.msgSerialized || null, mediaData: data.mediaData || null, mediaType: data.mediaType || null, mediaFilename: data.mediaFilename || null, mediaPages: data.mediaPages || null, mediaSize: data.mediaSize || null, quotedStatusMedia: data.quotedStatusMedia || null, quoted_body: data.quotedBody || null, quoted_msg_id: data.quotedMsgId || null, timestamp: data.timestamp });
+    io.emit('new_whatsapp_message', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl, body: data.body, msgId: data.msgId || null, msgSerialized: data.msgSerialized || null, mediaType: data.mediaType || null, mediaFilename: data.mediaFilename || null, mediaPages: data.mediaPages || null, mediaSize: data.mediaSize || null, has_media_data: !!(data.mediaData), has_quoted_status_media: !!(data.quotedStatusMedia), quoted_body: data.quotedBody || null, quoted_msg_id: data.quotedMsgId || null, timestamp: normalizeToIsoUtc(data.timestamp) });
     // Notify clients to refresh contacts panel when a new message arrives (new contact may have been upserted)
     io.emit('new_contact', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl });
     // NOTE: We intentionally do NOT push chat_history here.
@@ -1588,7 +1813,7 @@ whatsapp.on('outgoing_message', async (data) => {
             return;
         }
     }
-    io.emit('new_outgoing_message', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl, body: data.body, mediaData: data.mediaData || null, mediaType: data.mediaType || null, mediaFilename: data.mediaFilename || null, mediaPages: data.mediaPages || null, mediaSize: data.mediaSize || null, timestamp: data.timestamp });
+    io.emit('new_outgoing_message', { chatId: data.chatId, name: data.name, avatarUrl: data.avatarUrl, body: data.body, msgId: data.msgId || null, mediaType: data.mediaType || null, mediaFilename: data.mediaFilename || null, mediaPages: data.mediaPages || null, mediaSize: data.mediaSize || null, has_media_data: !!(data.mediaData), timestamp: normalizeToIsoUtc(data.timestamp) });
 });
 
 // ACK updates (delivered, read) — push tick updates to viewing clients
@@ -1661,7 +1886,11 @@ whatsapp.on('message_edited', async ({ msgId, chatId, newBody }) => {
 });
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`Gateway running on http://localhost:${PORT}`));
+server.listen(PORT, () => {
+    console.log(`Gateway running on http://localhost:${PORT}`);
+    console.log('[Clock] Server UTC ISO (compare with https://time.is/UTC):', new Date().toISOString());
+    if (db.dbFilePath) console.log('[DB] data.sqlite path:', db.dbFilePath);
+});
 
 server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') {
@@ -1746,7 +1975,7 @@ async function runDelayAlertWatchdog() {
         const hourEnd = parseInt(await db.getConfig('delay_alert_hour_end') || '18', 10);
 
         // Business hours check — use local server time (Brasília = UTC-3)
-        const nowLocal = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+        const nowLocal = getNowInAppTimezone();
         const currentHour = nowLocal.getHours();
         if (currentHour < hourStart || currentHour >= hourEnd) {
             console.log(`[DelayAlert] Fora do horário comercial (${currentHour}h, janela: ${hourStart}h-${hourEnd}h). Pulando.`);
@@ -1806,7 +2035,7 @@ async function runDelayAlertWatchdog() {
                 // Build alert message
                 const clientName = chat.name && chat.name !== chat.id ? chat.name : chat.id.replace(/@.*$/, '');
                 const minutesWaiting = Math.round(minutesSinceClient);
-                const lastMsgTime = lastClientMsg.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                const lastMsgTime = lastClientMsg.toLocaleTimeString('pt-BR', { timeZone: APP_TIMEZONE, hour: '2-digit', minute: '2-digit' });
 
                 let statusLine;
                 let attendantLine = '';
@@ -1889,12 +2118,11 @@ setInterval(async () => {
 
         const hour = parseInt(await db.getConfig('auto_purge_hour') || '3', 10);
         const now = new Date();
-        // Use local date parts (consistent with getHours() which is also local)
-        const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        const todayStr = getAppDateKey(now);
 
-        if (now.getHours() === hour && _lastAutoPurgeDate !== todayStr) {
+        if (getAppHour(now) === hour && _lastAutoPurgeDate !== todayStr) {
             _lastAutoPurgeDate = todayStr;
-            console.log(`[AutoPurge] Triggered at ${now.toLocaleTimeString('pt-BR')} (local time)`);
+            console.log(`[AutoPurge] Triggered at ${now.toLocaleTimeString('pt-BR', { timeZone: APP_TIMEZONE })} (${APP_TIMEZONE})`);
             runAutoPurge();
         }
     } catch (_) { }
@@ -1907,8 +2135,8 @@ console.log('[AutoPurge] Scheduler registered (checks every 60s)');
 let _lastNoteActivateMinute = '';
 setInterval(async () => {
     try {
-        const now = new Date();
-        const currentMinute = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const now = getNowInAppTimezone();
+        const currentMinute = getAppMinuteKey(now);
         if (currentMinute === _lastNoteActivateMinute) return; // already checked this minute
         _lastNoteActivateMinute = currentMinute;
         const today = now.getDay();
