@@ -35,6 +35,26 @@ function getNowInAppTimezone() {
     return new Date(new Date().toLocaleString('en-US', { timeZone: APP_TIMEZONE }));
 }
 
+/**
+ * Epoch em segundos gravado na DB quando o atendente responde pelo painel.
+ * Força o instante do navegador (clientSentAt) — hora do PC do atendente — para timestamp/sent_at_utc;
+ * só usa o servidor se o cliente não enviar ou o valor for inválido.
+ */
+function resolvePanelAttendantEpochSeconds(clientSentAt) {
+    const serverSec = Math.floor(Date.now() / 1000);
+    if (clientSentAt == null || clientSentAt === undefined) return serverSec;
+    let ms = Number(clientSentAt);
+    if (!Number.isFinite(ms)) return serverSec;
+    if (ms > 0 && ms < 1e12) ms *= 1000;
+    const minMs = Date.UTC(2018, 0, 1);
+    const maxMs = Date.UTC(2038, 11, 31);
+    if (ms < minMs || ms > maxMs) {
+        console.warn('[send_message] clientSentAt fora do intervalo seguro; usando relógio do servidor');
+        return serverSec;
+    }
+    return Math.floor(ms / 1000);
+}
+
 function getAppDateKey(date = new Date()) {
     return new Intl.DateTimeFormat('sv-SE', {
         timeZone: APP_TIMEZONE,
@@ -392,21 +412,36 @@ app.post('/api/transcribe', authMiddleware, async (req, res) => {
         const groqKey = await db.getConfig('groq_api_key');
         if (!groqKey) return res.status(503).json({ success: false, message: 'Chave Groq não configurada. Configure em Painel Admin → Integração IA.' });
 
-        const { audioData } = req.body;
-        if (!audioData) return res.status(400).json({ success: false, message: 'audioData obrigatório' });
+        const { audioData, msgId } = req.body;
+        if (!audioData && !msgId) return res.status(400).json({ success: false, message: 'Dados de áudio ou msgId obrigatório' });
 
-        // Strip data URI prefix — handles any number of params (e.g. codecs=opus)
-        // data:audio/ogg;codecs=opus;base64,AAAA... → everything before and including the comma is removed
-        const base64 = audioData.replace(/^data:[^,]+,/, '');
+        let base64;
+        let mime = 'audio/ogg';
+
+        // Fix audio missing: Either get base64 from audioData if present, or query it from DB via msgId
+        if (msgId) {
+            const row = await db.getMediaData(msgId, 'media');
+            if (row && row.data) {
+                base64 = row.data.replace(/^data:[^,]+,/, '');
+                const mimeMatch = row.data.match(/^data:([^;,]+)/);
+                if (mimeMatch) mime = mimeMatch[1].trim();
+                else mime = row.mediaType || 'audio/ogg';
+            } else if (!audioData) {
+                return res.status(404).json({ success: false, message: 'Áudio não encontrado no banco de dados.' });
+            }
+        }
+
+        if (!base64 && audioData) {
+            base64 = audioData.replace(/^data:[^,]+,/, '');
+            const mimeMatch = audioData.match(/^data:([^;,]+)/);
+            if (mimeMatch) mime = mimeMatch[1].trim();
+        }
+
         if (!base64 || base64.length < 100) {
             return res.status(400).json({ success: false, message: 'Dados de áudio inválidos ou vazios.' });
         }
         const audioBuffer = Buffer.from(base64, 'base64');
 
-        // Extract MIME from data URI — first segment between "data:" and ";"
-        // data:audio/ogg;codecs=opus;base64,... → "audio/ogg"
-        const mimeMatch = audioData.match(/^data:([^;,]+)/);
-        const mime = mimeMatch ? mimeMatch[1].trim() : 'audio/ogg';
         const extMap = { webm: 'webm', mp4: 'mp4', wav: 'wav', mpeg: 'mp3', mp3: 'mp3', m4a: 'm4a', opus: 'ogg', flac: 'flac', ogg: 'ogg' };
         const extKey = Object.keys(extMap).find(k => mime.includes(k));
         const ext = extKey ? extMap[extKey] : 'ogg';
@@ -773,9 +808,11 @@ app.post('/api/start-chat', async (req, res) => {
         const prefixed = `*${attendantName || 'Atendente'} | ${company}:* ${message}`;
         const msg = await whatsapp.sendMessage(contactId, prefixed); // uses _sentIds to prevent message_create duplicate
         const msgId = (msg && msg.id && msg.id.id) ? msg.id.id : `start_${Date.now()}`;
+        const startOutgoingTs = Math.floor(Date.now() / 1000);
         // fromMe=true: esta é uma mensagem de saída — não deve resetar o status do chat
         await db.updateChat(contactId, null, message, null, 'waiting', null, true);
-        await db.saveMessage(msgId, contactId, message, 1, null, attendantName || 'Atendente');
+        await db.saveMessage(msgId, contactId, message, 1, null, attendantName || 'Atendente',
+            null, null, null, null, null, 1, null, null, null, null, startOutgoingTs, true);
         // Atribuir o atendente imediatamente para evitar que o chat apareça na fila de 'waiting'
         if (attendantId) {
             const { serviceCode } = await db.assignChat(contactId, attendantId, attendantName || 'Atendente');
@@ -819,9 +856,10 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
         const waMsg = await whatsapp.sendMedia(chatId, base64, mimetype, filename, captionText);
         const msgId = (waMsg && waMsg.id && waMsg.id.id) ? waMsg.id.id : `media_${Date.now()}`;
         const displayBody = captionText || filename;
+        const mediaOutgoingTs = Math.floor(Date.now() / 1000);
         await db.saveMessage(msgId, chatId, displayBody, 1, null, decoded.name,
             `data:${mimetype};base64,${base64}`, mimetype, filename, null,
-            Math.round(req.file.size / 1024));
+            Math.round(req.file.size / 1024), 1, null, null, null, null, mediaOutgoingTs, true);
 
         // Broadcast updated queue & history to all viewing attendants
         await broadcastQueue();
@@ -1123,7 +1161,9 @@ io.on('connection', (socket) => {
     });
 
     // ── Send message (to WhatsApp) ────────────────────────────────
-    socket.on('send_message', async ({ chatId, body, quotedBody, quotedMsgId, quotedMsgSerialized }) => {
+    socket.on('send_message', async ({ chatId, body, quotedBody, quotedMsgId, quotedMsgSerialized, clientSentAt }) => {
+        // Ancorar já no início: hora “forçada” na DB = relógio do atendente (browser), não o pós-await do WA
+        const outgoingTs = resolvePanelAttendantEpochSeconds(clientSentAt);
         console.log('[SEND_DEBUG] Received send_message:', chatId, body?.slice(0, 50));
         const prefixedBody = `*${socket.user.name} | ${COMPANY_NAME}:* ${body}`;
         let waMsg = null;
@@ -1185,12 +1225,50 @@ io.on('connection', (socket) => {
 
         // Save to DB with retry — protects against transient SQLITE_BUSY from concurrent transactions
         try {
-            await db.saveMessage(msgId, chatId, body, 1, quotedBody || null, socket.user.name, null, null, null, null, null, 1, null, null, quotedMsgId || null);
+            await db.saveMessage(
+                msgId,
+                chatId,
+                body,
+                1,
+                quotedBody || null,
+                socket.user.name,
+                null,
+                null,
+                null,
+                null,
+                null,
+                1,
+                null,
+                null,
+                quotedMsgId || null,
+                null,
+                outgoingTs,
+                true
+            );
         } catch (saveErr) {
             console.warn('[send_message] saveMessage failed, retrying in 500ms:', saveErr.message);
             try {
                 await new Promise(r => setTimeout(r, 500));
-                await db.saveMessage(msgId, chatId, body, 1, quotedBody || null, socket.user.name, null, null, null, null, null, 1, null, null, quotedMsgId || null);
+                await db.saveMessage(
+                    msgId,
+                    chatId,
+                    body,
+                    1,
+                    quotedBody || null,
+                    socket.user.name,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    1,
+                    null,
+                    null,
+                    quotedMsgId || null,
+                    null,
+                    outgoingTs,
+                    true
+                );
             } catch (retryErr) {
                 console.error('[send_message] saveMessage retry failed:', retryErr.message);
             }
@@ -1199,7 +1277,7 @@ io.on('connection', (socket) => {
         // ALWAYS emit live_message — the WA message was already sent successfully
         const liveMsg = {
             id: msgId, chat_id: chatId, body, from_me: 1,
-            sender_name: socket.user.name, timestamp: new Date().toISOString(),
+            sender_name: socket.user.name, timestamp: normalizeToIsoUtc(outgoingTs),
             quoted_body: quotedBody || null, quoted_msg_id: quotedMsgId || null,
             record_type: 'message', reactions: {}
         };
@@ -1315,13 +1393,15 @@ io.on('connection', (socket) => {
     });
 
     // ── Send internal note (NOT sent via WhatsApp) ────────────────
-    socket.on('send_note', async ({ chatId, body }) => {
+    socket.on('send_note', async ({ chatId, body, clientSentAt }) => {
+        const noteTs = resolvePanelAttendantEpochSeconds(clientSentAt);
         const noteId = `note_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-        await db.saveMessage(noteId, chatId, body, 2, null, socket.user.name);
+        await db.saveMessage(noteId, chatId, body, 2, null, socket.user.name,
+            null, null, null, null, null, 1, null, null, null, null, noteTs, true);
         // Push only the new note — avoids full history reload
         const liveNote = {
             id: noteId, chat_id: chatId, body, from_me: 2,
-            sender_name: socket.user.name, timestamp: new Date().toISOString(),
+            sender_name: socket.user.name, timestamp: normalizeToIsoUtc(noteTs),
             record_type: 'message', reactions: {}
         };
         Array.from(onlineAttendants.values()).forEach(s => {
@@ -1806,7 +1886,11 @@ whatsapp.on('message_edited', async ({ msgId, chatId, newBody }) => {
 });
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`Gateway running on http://localhost:${PORT}`));
+server.listen(PORT, () => {
+    console.log(`Gateway running on http://localhost:${PORT}`);
+    console.log('[Clock] Server UTC ISO (compare with https://time.is/UTC):', new Date().toISOString());
+    if (db.dbFilePath) console.log('[DB] data.sqlite path:', db.dbFilePath);
+});
 
 server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') {

@@ -1605,7 +1605,12 @@
                 }
             }
             const list = document.getElementById('conv-list');
-            if (!filtered.length) { list.innerHTML = `<div class="empty-state"><div class="icon">💬</div><p>Nenhuma conversa</p></div>`; return; }
+            const scrollTopBefore = list.scrollTop;
+            
+            if (!filtered.length) { 
+                list.innerHTML = `<div class="empty-state"><div class="icon">💬</div><p>Nenhuma conversa</p></div>`; 
+                return; 
+            }
             list.innerHTML = filtered.map(c => {
                 const init = (c.name || c.id)[0].toUpperCase();
                 const unread = unreadMap[c.id] || 0;
@@ -1648,6 +1653,7 @@
 
 
             }).join('');
+            list.scrollTop = scrollTopBefore;
         }
 
         function statusLabel(status, attendant) {
@@ -2028,7 +2034,7 @@
             if (!text || !currentChatId) return;
             hideCannedDropdown();
             if (composerMode === 'note') {
-                socket.emit('send_note', { chatId: currentChatId, body: text });
+                socket.emit('send_note', { chatId: currentChatId, body: text, clientSentAt: Date.now() });
                 appendMessage({ id: 'note_opt_' + Date.now(), body: text, from_me: 2, timestamp: new Date().toISOString(), sender_name: user.name, reactions: {} });
             } else {
                 // Optimistic UI: show message immediately with pending tick
@@ -2037,7 +2043,8 @@
                     chatId: currentChatId, body: text,
                     quotedBody: replyToMsg ? replyToMsg.body : null,
                     quotedMsgId: replyToMsg ? replyToMsg.id : null,
-                    quotedMsgSerialized: replyToMsg ? (replyToMsg.serialized || null) : null
+                    quotedMsgSerialized: replyToMsg ? (replyToMsg.serialized || null) : null,
+                    clientSentAt: Date.now()
                 });
             }
             clearReplyTo(); stopTyping();
@@ -2197,13 +2204,13 @@
             if (mt?.startsWith('video/')) return `<video src="${md}" class="media-thumb" controls preload="metadata"></video>`;
             if (mt?.startsWith('audio/')) {
                 const audioId = 'audio_' + (msg.id || Date.now());
-                // Store media URL in JS Map for transcription
-                if (md) _audioDataCache.set(audioId, md);
-                const transcribeBtn = md
+                // Store msgId + URL in JS Map for transcription
+                if (md || msg.id) _audioDataCache.set(audioId, { md, msgId: msg.id });
+                const transcribeBtn = (md || msg.id)
                     ? `<button class="pdf-dl" id="trbtn_${audioId}" style="margin-top:6px;font-size:.78rem" onclick="transcribeAudio('${audioId}')" title="Transcrever com IA">🗒️ Transcrever</button>`
                     : '';
                 return `<div style="display:flex;flex-direction:column;gap:2px">
-                    <audio id="${audioId}" src="${md}" controls preload="metadata" style="max-width:220px;margin-top:4px"></audio>
+                    <audio id="${audioId}" src="${md || ''}" controls preload="metadata" style="max-width:220px;margin-top:4px"></audio>
                     ${transcribeBtn}
                     <div id="tx_${audioId}" style="display:none;margin-top:6px;font-size:.82rem;color:var(--text-1);background:var(--surface2);border-radius:8px;padding:8px 10px;max-width:260px;white-space:pre-wrap;line-height:1.5"></div>
                 </div>`;
@@ -3338,8 +3345,10 @@
                     const wrap = document.createElement('div');
                     wrap.className = 'message-row ' + (isOut ? 'out' : 'in');
                     wrap.style.opacity = '0.9'; // subtle tint to show read-only
-                    const d = new Date(m.timestamp);
-                    const timeStr = d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+                    const d = parseTimestampToDate(m.timestamp);
+                    const timeStr = d
+                        ? formatBrDateTime(d, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                        : '';
                     let bodyHtml = m.body ? m.body.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') : '';
                     if (m.media_type && !bodyHtml) bodyHtml = m.media_filename ? `📎 ${m.media_filename}` : `[${(m.media_type || '').split('/')[0]}]`;
                     wrap.innerHTML = `<div class="bubble${isOut ? ' out' : ''}">
@@ -4149,22 +4158,27 @@
             const box = document.getElementById('tx_' + audioId);
             if (!btn || !box) return;
 
-            // Read audioSrc from JS Map cache — safe from HTML escaping/truncation
-            const audioSrc = _audioDataCache.get(audioId) || '';
-            if (!audioSrc || audioSrc.length < 50) {
+            // Read data from JS Map cache
+            const cacheData = _audioDataCache.get(audioId);
+            if (!cacheData) {
                 showToast('Erro', 'Dados de áudio não disponíveis para transcrição.', true);
                 return;
             }
+
+            const md = cacheData.md || '';
+            const msgId = cacheData.msgId;
+            const isBase64 = md.startsWith('data:');
 
             btn.disabled = true;
             btn.textContent = '⏳ Transcrevendo...';
             box.style.display = 'none';
 
             try {
+                const bodyPayload = isBase64 ? { audioData: md } : { msgId: msgId };
                 const res = await fetch(`${SERVER_URL}/api/transcribe`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                    body: JSON.stringify({ audioData: audioSrc })
+                    body: JSON.stringify(bodyPayload)
                 });
                 const data = await res.json();
                 if (data.success && data.text) {

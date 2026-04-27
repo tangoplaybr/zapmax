@@ -3,18 +3,53 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const fs = require('fs');
 
+/** Unix seconds for ordering; prefer sent_at_utc (Chatwoot-style canonical UTC instant) when set. */
+function messageRowUnixForSort(row) {
+    if (row.record_type === 'event' || row.from_me === -1) {
+        const s = String(row.timestamp || '').trim().replace(' ', 'T');
+        if (!s) return 0;
+        const iso = s.includes('Z') || /[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z';
+        const d = new Date(iso);
+        return Number.isNaN(d.getTime()) ? 0 : Math.floor(d.getTime() / 1000);
+    }
+    if (row.sent_at_utc != null) return row.sent_at_utc;
+    const s = String(row.timestamp || '').trim().replace(' ', 'T');
+    if (!s) return 0;
+    const iso = s.includes('Z') || /[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z';
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? 0 : Math.floor(d.getTime() / 1000);
+}
+
+/** API payload: always ISO-8601 Z when we have a canonical unix instant (matches Chatwoot API UTC). */
+function messageTimestampIsoFromRow(row) {
+    if (row.sent_at_utc != null) return new Date(row.sent_at_utc * 1000).toISOString();
+    return row.timestamp;
+}
+
+function parseBeforeTimestampToUnix(beforeTimestamp) {
+    if (beforeTimestamp == null || beforeTimestamp === '') return null;
+    if (typeof beforeTimestamp === 'number' && !Number.isNaN(beforeTimestamp))
+        return beforeTimestamp < 1e12 ? beforeTimestamp : Math.floor(beforeTimestamp / 1000);
+    const d = new Date(beforeTimestamp);
+    if (Number.isNaN(d.getTime())) return null;
+    return Math.floor(d.getTime() / 1000);
+}
+
 class Database {
     constructor() {
         // DB path priority (highest → lowest):
         // 1. DB_PATH env variable  — set this on VPS/production for full control
-        // 2. Electron userData     — survives client builds on Windows desktop
-        // 3. OS home dir fallback  — ~/.zapmax/data.sqlite (safe on Linux/macOS VPS)
-        // 4. Dados/ inside server  — legacy fallback (data lost on redeploy!)
+        // 2. WA_DATA_DIR — set by apps/server/index.js (Electron userData) so DB matches the app data dir
+        // 3. Electron-style: %APPDATA%\ZapMax on Windows
+        // 4. OS home dir fallback  — ~/.zapmax/data.sqlite (safe on Linux/macOS VPS)
+        // 5. Dados/ inside server  — legacy fallback (data lost on redeploy!)
         let dbDir;
         if (process.env.DB_PATH) {
             // Explicit override: DB_PATH=/srv/zapmax or DB_PATH=/srv/zapmax/data.sqlite
             const p = process.env.DB_PATH;
             dbDir = p.endsWith('.sqlite') ? path.dirname(p) : p;
+        } else if (process.env.WA_DATA_DIR) {
+            dbDir = process.env.WA_DATA_DIR;
         } else if (process.env.APPDATA) {
             // Windows Electron/desktop: %APPDATA%\ZapMax
             dbDir = path.join(process.env.APPDATA, 'ZapMax');
@@ -26,6 +61,8 @@ class Database {
         const dbFile = (process.env.DB_PATH && process.env.DB_PATH.endsWith('.sqlite'))
             ? process.env.DB_PATH
             : path.join(dbDir, 'data.sqlite');
+        /** @type {string} Absolute path to SQLite file (for logs and tools/inspect-message-time.js). */
+        this.dbFilePath = dbFile;
 
         // One-time migration: copy from old location if new location is empty
         const legacyPath = path.join(__dirname, 'Dados', 'data.sqlite');
@@ -37,8 +74,18 @@ class Database {
                 console.warn('[DB] Migration copy failed:', e.message);
             }
         }
+        // Electron previously used %APPDATA%\\ZapMax\\data.sqlite; after WA_DATA_DIR alignment copy once.
+        const zapMaxLegacy = process.env.APPDATA ? path.join(process.env.APPDATA, 'ZapMax', 'data.sqlite') : null;
+        if (process.env.WA_DATA_DIR && !fs.existsSync(dbFile) && zapMaxLegacy && fs.existsSync(zapMaxLegacy)) {
+            try {
+                fs.copyFileSync(zapMaxLegacy, dbFile);
+                console.log('[DB] Migrated database from legacy %APPDATA%\\ZapMax\\data.sqlite →', dbFile);
+            } catch (e) {
+                console.warn('[DB] ZapMax legacy copy failed:', e.message);
+            }
+        }
 
-        console.log('Database path:', dbFile);
+        console.log('[DB] SQLite file:', dbFile, '(set DB_PATH or WA_DATA_DIR to override; rebuild ZapMax Server after changes)');
         this.db = new sqlite3.Database(dbFile, (err) => {
             if (err) {
                 console.error('Error opening database', err);
@@ -93,6 +140,16 @@ class Database {
             this.db.run(`ALTER TABLE messages ADD COLUMN is_deleted INTEGER DEFAULT 0`, () => { });
             this.db.run(`ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0`, () => { });
             this.db.run(`ALTER TABLE messages ADD COLUMN msg_serialized TEXT`, () => { });
+            this.db.run(`ALTER TABLE messages ADD COLUMN sent_at_utc INTEGER`, () => { });
+            // Chatwoot-style: sent_at_utc = canonical UTC epoch for every row. Safe backfill only for
+            // incoming (from_me=0) where timestamp came from WhatsApp; do not bulk-backfill outbound TEXT.
+            this.db.run(
+                `UPDATE messages SET sent_at_utc = CAST(strftime('%s', timestamp) AS INTEGER)
+                 WHERE from_me = 0 AND sent_at_utc IS NULL AND timestamp IS NOT NULL`,
+                (err) => {
+                    if (!err) console.log('[DB] Backfilled sent_at_utc for incoming rows only (legacy)');
+                }
+            );
             // Clean invalid phone values (WA internal IDs > 15 digits stored as phone)
             this.db.run(`UPDATE chats SET phone = NULL WHERE phone IS NOT NULL AND length(phone) > 15`, () => { });
             this.db.run(`UPDATE contacts SET number = NULL WHERE number IS NOT NULL AND length(number) > 15`, () => { });
@@ -876,16 +933,17 @@ class Database {
      */
     getPagedHistory(chatId, beforeTimestamp = null, limit = 25) {
         return new Promise((resolve, reject) => {
-            // Fetch messages with reactions, newest first, with optional cursor
-            const cursorClause = beforeTimestamp ? `AND m.timestamp < ?` : '';
-            const msgParams = beforeTimestamp
-                ? [chatId, beforeTimestamp, limit + 1]  // +1 to probe hasMore
+            const beforeUnix = parseBeforeTimestampToUnix(beforeTimestamp);
+            const msgSort = `COALESCE(m.sent_at_utc, CAST(strftime('%s', m.timestamp) AS INTEGER))`;
+            const cursorClause = beforeUnix != null ? `AND ${msgSort} < ?` : '';
+            const msgParams = beforeUnix != null
+                ? [chatId, beforeUnix, limit + 1]
                 : [chatId, limit + 1];
 
             this.db.all(
                 `SELECT m.id, m.chat_id, m.body, m.from_me, m.sender_name,
                         m.media_type, m.media_filename, m.media_pages,
-                        m.media_size, m.timestamp, m.ack, m.is_deleted, m.is_edited,
+                        m.media_size, m.timestamp, m.sent_at_utc, m.ack, m.is_deleted, m.is_edited,
                         m.quoted_body, m.quoted_status_type,
                         m.quoted_msg_id, m.msg_serialized,
                         CASE WHEN m.media_data IS NOT NULL AND m.media_data != '' THEN 1 ELSE 0 END AS has_media_data,
@@ -896,7 +954,7 @@ class Database {
                  LEFT JOIN reactions r ON r.message_id = m.id
                  WHERE m.chat_id = ? ${cursorClause}
                  GROUP BY m.id
-                 ORDER BY m.timestamp DESC
+                 ORDER BY ${msgSort} DESC, m.id DESC
                  LIMIT ?`,
                 msgParams,
                 (err, msgRows) => {
@@ -905,21 +963,18 @@ class Database {
                     const hasMore = msgRows.length > limit;
                     if (hasMore) msgRows.pop(); // remove the probe row
 
-                    // Determine timestamp window for fetching matching chat_events
-                    const oldest = msgRows.length ? msgRows[msgRows.length - 1].timestamp : null;
-                    const newest = msgRows.length ? msgRows[0].timestamp : null;
+                    const oldestUnixBound = msgRows.length ? messageRowUnixForSort(msgRows[msgRows.length - 1]) : null;
 
-                    // Build event query for the same time window
                     let evtSql, evtParams;
-                    if (oldest && newest) {
-                        const beforeClause = beforeTimestamp ? `AND timestamp < ?` : '';
+                    if (oldestUnixBound != null) {
+                        const beforeEvt = beforeUnix != null ? `AND CAST(strftime('%s', timestamp) AS INTEGER) < ?` : '';
                         evtSql = `SELECT id, chat_id, type, description, timestamp, 'event' AS record_type
                                   FROM chat_events
-                                  WHERE chat_id = ? ${beforeClause} AND timestamp >= ?
+                                  WHERE chat_id = ? ${beforeEvt} AND CAST(strftime('%s', timestamp) AS INTEGER) >= ?
                                   ORDER BY timestamp ASC`;
-                        evtParams = beforeTimestamp
-                            ? [chatId, beforeTimestamp, oldest]
-                            : [chatId, oldest];
+                        evtParams = beforeUnix != null
+                            ? [chatId, beforeUnix, oldestUnixBound]
+                            : [chatId, oldestUnixBound];
                     } else {
                         evtSql = `SELECT id, chat_id, type, description, timestamp, 'event' AS record_type
                                   FROM chat_events WHERE chat_id = ? ORDER BY timestamp ASC LIMIT 0`;
@@ -929,7 +984,6 @@ class Database {
                     this.db.all(evtSql, evtParams, (err2, evtRows) => {
                         if (err2) return reject(err2);
 
-                        // Parse reactions
                         const messages = msgRows.map(row => {
                             const reactions = {};
                             if (row.reactions_raw) {
@@ -941,14 +995,15 @@ class Database {
                                     if (senderName) reactions[emoji].senders.push(senderName);
                                 });
                             }
-                            return { ...row, reactions };
+                            const { sent_at_utc, reactions_raw, ...base } = row;
+                            const timestamp = messageTimestampIsoFromRow(row);
+                            return { ...base, timestamp, reactions };
                         });
 
                         const events = evtRows.map(e => ({ ...e, from_me: -1 }));
 
-                        // Merge and return in chronological order (oldest → newest)
                         const combined = [...messages, ...events]
-                            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                            .sort((a, b) => messageRowUnixForSort(a) - messageRowUnixForSort(b));
 
                         resolve({ messages: combined, hasMore });
                     });
@@ -1002,18 +1057,40 @@ class Database {
         });
     }
 
-    saveMessage(messageId, chatId, body, fromMe, quotedBody = null, senderName = null, mediaData = null, mediaType = null, mediaFilename = null, mediaPages = null, mediaSize = null, ack = 1, quotedStatusMedia = null, quotedStatusType = null, quotedMsgId = null, msgSerialized = null, timestamp = null) {
+    saveMessage(messageId, chatId, body, fromMe, quotedBody = null, senderName = null, mediaData = null, mediaType = null, mediaFilename = null, mediaPages = null, mediaSize = null, ack = 1, quotedStatusMedia = null, quotedStatusType = null, quotedMsgId = null, msgSerialized = null, timestamp = null, outgoingAuthoritative = false) {
         return new Promise((resolve, reject) => {
             const fromMeVal = (fromMe === true || fromMe === 1) ? 1 : fromMe === 2 ? 2 : 0;
-            const tsStr = timestamp ? new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp).toISOString().replace('T', ' ').slice(0, 19) : null;
-            
-            const cols = `id, chat_id, body, from_me, quoted_body, sender_name, media_data, media_type, media_filename, media_pages, media_size, ack, quoted_status_media, quoted_status_type, quoted_msg_id, msg_serialized` + (tsStr ? `, timestamp` : ``);
-            const vals = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?` + (tsStr ? `, ?` : ``);
-            const params = [messageId, chatId, body, fromMeVal, quotedBody, senderName, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, ack, quotedStatusMedia, quotedStatusType, quotedMsgId, msgSerialized];
-            if (tsStr) params.push(tsStr);
+            const validTs = timestamp || Math.floor(Date.now() / 1000);
+            const tsStr = new Date(validTs < 1e12 ? validTs * 1000 : validTs).toISOString().replace('T', ' ').slice(0, 19);
+            const sentAtUtcVal = validTs;
+
+            const cols = `id, chat_id, body, from_me, quoted_body, sender_name, media_data, media_type, media_filename, media_pages, media_size, ack, quoted_status_media, quoted_status_type, quoted_msg_id, msg_serialized, timestamp, sent_at_utc`;
+            const vals = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
+            const params = [messageId, chatId, body, fromMeVal, quotedBody, senderName, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, ack, quotedStatusMedia, quotedStatusType, quotedMsgId, msgSerialized, tsStr, sentAtUtcVal];
+            const timestampExpr = outgoingAuthoritative
+                ? 'excluded.timestamp'
+                : `CASE
+                    WHEN messages.from_me != 1 THEN excluded.timestamp
+                    WHEN julianday(excluded.timestamp) > julianday(messages.timestamp) THEN excluded.timestamp
+                    ELSE messages.timestamp
+                END`;
+            const sentAtExpr = outgoingAuthoritative
+                ? 'excluded.sent_at_utc'
+                : `CASE
+                    WHEN excluded.sent_at_utc IS NULL THEN messages.sent_at_utc
+                    WHEN messages.sent_at_utc IS NULL THEN excluded.sent_at_utc
+                    WHEN excluded.sent_at_utc > messages.sent_at_utc THEN excluded.sent_at_utc
+                    ELSE messages.sent_at_utc
+                END`;
+            let updateClause = ` ON CONFLICT(id) DO UPDATE SET 
+                ack = CASE WHEN excluded.ack > messages.ack THEN excluded.ack ELSE messages.ack END,
+                media_data = COALESCE(excluded.media_data, messages.media_data),
+                msg_serialized = COALESCE(excluded.msg_serialized, messages.msg_serialized),
+                timestamp = ${timestampExpr},
+                sent_at_utc = ${sentAtExpr}`;
 
             this.db.run(
-                `INSERT OR IGNORE INTO messages (${cols}) VALUES (${vals})`,
+                `INSERT INTO messages (${cols}) VALUES (${vals})${updateClause}`,
                 params,
                 (err) => { if (err) reject(err); else resolve(); }
             );
@@ -1027,7 +1104,7 @@ class Database {
     updateChatAndSaveMessage(chatOpts, msgOpts) {
         const { chatId, name, lastMessage, avatarUrl, status, phone, fromMe } = chatOpts;
         const { messageId, body, fromMe: msgFromMe, quotedBody, senderName, mediaData, mediaType,
-            mediaFilename, mediaPages, mediaSize, ack, quotedStatusMedia, quotedStatusType, quotedMsgId } = msgOpts;
+            mediaFilename, mediaPages, mediaSize, ack, quotedStatusMedia, quotedStatusType, quotedMsgId, timestamp } = msgOpts;
         return new Promise((resolve, reject) => {
             this.db.serialize(() => {
                 this.db.run('BEGIN IMMEDIATE', (beginErr) => {
@@ -1069,10 +1146,13 @@ class Database {
 
                             // 3) saveMessage
                             const fromMeVal = (msgFromMe === true || msgFromMe === 1) ? 1 : msgFromMe === 2 ? 2 : 0;
+                            const validMsgTs = timestamp || Math.floor(Date.now() / 1000);
+                            const msgTsStr = new Date(validMsgTs < 1e12 ? validMsgTs * 1000 : validMsgTs).toISOString().replace('T', ' ').slice(0, 19);
+                            const msgSentAtUtc = validMsgTs;
                             this.db.run(
-                                `INSERT OR IGNORE INTO messages (id, chat_id, body, from_me, quoted_body, sender_name, media_data, media_type, media_filename, media_pages, media_size, ack, quoted_status_media, quoted_status_type, quoted_msg_id, msg_serialized)
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                                [messageId, chatId, body || lastMessage, fromMeVal, quotedBody, senderName, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, ack ?? 1, quotedStatusMedia, quotedStatusType, quotedMsgId, msgOpts.msgSerialized || null],
+                                `INSERT OR IGNORE INTO messages (id, chat_id, body, from_me, quoted_body, sender_name, media_data, media_type, media_filename, media_pages, media_size, ack, quoted_status_media, quoted_status_type, quoted_msg_id, msg_serialized, timestamp, sent_at_utc)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                [messageId, chatId, body || lastMessage, fromMeVal, quotedBody, senderName, mediaData, mediaType, mediaFilename, mediaPages, mediaSize, ack ?? 1, quotedStatusMedia, quotedStatusType, quotedMsgId, msgOpts.msgSerialized || null, msgTsStr, msgSentAtUtc],
                                 (msgErr) => {
                                     if (msgErr) {
                                         this.db.run('ROLLBACK', () => reject(msgErr));
@@ -1133,13 +1213,23 @@ class Database {
         });
     }
 
+    updateMessageTimestamp(messageId, timestamp) {
+        return new Promise((resolve, reject) => {
+            if (!timestamp) return resolve();
+            const tsStr = new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp).toISOString().replace('T', ' ').slice(0, 19);
+            this.db.run(`UPDATE messages SET timestamp = ? WHERE id = ?`, [tsStr, messageId],
+                (err) => { if (err) reject(err); else resolve(); }
+            );
+        });
+    }
+
     getChatHistory(chatId) {
         return new Promise((resolve, reject) => {
             // Fetch messages with reactions
             this.db.all(
                 `SELECT m.id, m.chat_id, m.body, m.from_me, m.sender_name,
                         m.media_type, m.media_filename, m.media_pages,
-                        m.media_size, m.timestamp, m.ack, m.is_deleted, m.is_edited,
+                        m.media_size, m.timestamp, m.sent_at_utc, m.ack, m.is_deleted, m.is_edited,
                         m.quoted_body, m.quoted_status_type,
                         m.quoted_msg_id, m.msg_serialized,
                         CASE WHEN m.media_data IS NOT NULL AND m.media_data != '' THEN 1 ELSE 0 END AS has_media_data,
@@ -1150,7 +1240,7 @@ class Database {
                  LEFT JOIN reactions r ON r.message_id = m.id
                  WHERE m.chat_id = ?
                  GROUP BY m.id
-                 ORDER BY m.timestamp ASC`,
+                 ORDER BY COALESCE(m.sent_at_utc, CAST(strftime('%s', m.timestamp) AS INTEGER)) ASC, m.id ASC`,
                 [chatId],
                 (err, msgRows) => {
                     if (err) return reject(err);
@@ -1172,11 +1262,13 @@ class Database {
                                         if (senderName) reactions[emoji].senders.push(senderName);
                                     });
                                 }
-                                return { ...row, reactions };
+                                const { sent_at_utc, reactions_raw, ...base } = row;
+                                const timestamp = messageTimestampIsoFromRow(row);
+                                return { ...base, timestamp, reactions };
                             });
                             const events = evtRows.map(e => ({ ...e, from_me: -1 }));
                             const combined = [...messages, ...events]
-                                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                                .sort((a, b) => messageRowUnixForSort(a) - messageRowUnixForSort(b));
                             resolve(combined);
                         }
                     );
@@ -1698,12 +1790,13 @@ class Database {
     getLastClientMessageTime(chatId) {
         return new Promise((resolve, reject) => {
             this.db.get(
-                `SELECT timestamp FROM messages WHERE chat_id = ? AND from_me = 0 AND is_deleted = 0 ORDER BY timestamp DESC LIMIT 1`,
+                `SELECT timestamp, sent_at_utc FROM messages WHERE chat_id = ? AND from_me = 0 AND is_deleted = 0
+                 ORDER BY COALESCE(sent_at_utc, CAST(strftime('%s', timestamp) AS INTEGER)) DESC LIMIT 1`,
                 [chatId],
                 (err, row) => {
                     if (err) return reject(err);
                     if (!row) return resolve(null);
-                    // SQLite CURRENT_TIMESTAMP stores UTC without 'Z' — force UTC parse
+                    if (row.sent_at_utc != null) return resolve(new Date(row.sent_at_utc * 1000));
                     const ts = row.timestamp.includes('+') || row.timestamp.endsWith('Z')
                         ? row.timestamp
                         : row.timestamp.replace(' ', 'T') + '+00:00';
@@ -1717,12 +1810,13 @@ class Database {
     getLastAttendantMessageTime(chatId) {
         return new Promise((resolve, reject) => {
             this.db.get(
-                `SELECT timestamp FROM messages WHERE chat_id = ? AND from_me = 1 AND is_deleted = 0 ORDER BY timestamp DESC LIMIT 1`,
+                `SELECT timestamp, sent_at_utc FROM messages WHERE chat_id = ? AND from_me = 1 AND is_deleted = 0
+                 ORDER BY COALESCE(sent_at_utc, CAST(strftime('%s', timestamp) AS INTEGER)) DESC LIMIT 1`,
                 [chatId],
                 (err, row) => {
                     if (err) return reject(err);
                     if (!row) return resolve(null);
-                    // SQLite CURRENT_TIMESTAMP stores UTC without 'Z' — force UTC parse
+                    if (row.sent_at_utc != null) return resolve(new Date(row.sent_at_utc * 1000));
                     const ts = row.timestamp.includes('+') || row.timestamp.endsWith('Z')
                         ? row.timestamp
                         : row.timestamp.replace(' ', 'T') + '+00:00';

@@ -6,6 +6,7 @@
   "scripts": {
     "start:server": "electron apps/server/index.js",
     "start:client": "electron apps/client/index.js",
+    "inspect-msg": "node tools/inspect-message-time.js",
     "build:server": "electron-builder build --config electron-builder-server.json",
     "build:client": "electron-builder build --config electron-builder-client.json"
   },
